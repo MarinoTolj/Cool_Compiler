@@ -1,0 +1,15 @@
+SPIM Version 8.0 of January 8, 2010
+Copyright 1990-2010, James R. Larus.
+All Rights Reserved.
+See the file README for a full copyright notice.
+Loaded: /usr/lib/spim/exceptions.s
+The following symbols are undefined:
+main
+
+old: 0.  new: 1
+old: 1.  new: 2
+old: 2.  new: 5
+old: 0.  new: 1
+old: 1.  new: 2
+old: 2.  new: 29
+COOL program successfully executed

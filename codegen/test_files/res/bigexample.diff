@@ -1,0 +1,6 @@
+error in line# 16
+    parsed as: assertion failed: 399
+    should be: bigAttrAccess
+error in line# 16
+    parsed as: Abort called from class Blah
+    should be: looks ok!

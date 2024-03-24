@@ -1,0 +1,3 @@
+error in line# 4
+    parsed as: - dynamic type was Book -
+    should be: - dynamic type was Article -
