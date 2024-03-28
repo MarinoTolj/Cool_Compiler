@@ -133,40 +133,225 @@
     %type <program> program
     %type <classes> class_list
     %type <class_> class
-    
+    %type <feature> feature
+    %type <formal> formal
+    %type <expression> expression
+    %type <expression> let_list
+
+    %type <expression> if
+    %type <expression> dispatch
+    %type <expression> while
+    %type <expression> typecase
+    %type <case_> branch
+    %type <expression> new 
+    %type <expression> is_void
+
     /* You will want to change the following line. */
-    %type <features> dummy_feature_list
+    %type <features> feature_list
+    %type <formals> formal_list
+    %type <expressions> expression_list
+    %type <expressions> expression_block
+    %type <cases> branch_list
     
     /* Precedence declarations go here. */
-    
+    %right ASSIGN
+    %nonassoc NOT
+    %nonassoc LE '='
+    %left '+' '-'
+    %left '*' '/'
+    %left ISVOID
+    %nonassoc '~'
+    %left '@'
+    %left '.'
+  
+
     
     %%
     /* 
     Save the root of the abstract syntax tree in a global variable.
     */
-    program	: class_list	{ @$ = @1; ast_root = program($1); }
-    ;
+    program	: class_list	{ @$ = @1; SET_NODELOC(@1);ast_root = program($1); };
     
     class_list
     : class			/* single class */
-    { $$ = single_Classes($1);
-    parse_results = $$; }
+    { 
+      @$=@1;SET_NODELOC(@1);
+      $$ = single_Classes($1);
+      parse_results = $$; 
+    }
     | class_list class	/* several classes */
-    { $$ = append_Classes($1,single_Classes($2)); 
-    parse_results = $$; }
-    ;
+    { 
+    @$=@2;SET_NODELOC(@2)
+    $$ = append_Classes($1,single_Classes($2)); 
+    parse_results = $$; 
+    };
     
     /* If no parent is specified, the class inherits from the Object class. */
-    class	: CLASS TYPEID '{' dummy_feature_list '}' ';'
+    class	: CLASS TYPEID '{' feature_list '}' ';'
     { $$ = class_($2,idtable.add_string("Object"),$4,
     stringtable.add_string(curr_filename)); }
-    | CLASS TYPEID INHERITS TYPEID '{' dummy_feature_list '}' ';'
+    | CLASS TYPEID INHERITS TYPEID '{' feature_list '}' ';'
     { $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); }
+    | error {}
+    ;
+
+    feature: OBJECTID ':' TYPEID ';' {$$=attr($1, $3, no_expr());}
+    | OBJECTID '(' formal_list ')' ':' TYPEID '{'  expression '}' ';' {$$=method($1, $3, $6, $8);}
+    | OBJECTID ':' TYPEID ASSIGN expression ';'
+    {
+      $$ = attr($1, $3, $5);
+    }
+    ;
+
+    feature_list: /*empy*/ {$$=nil_Features();}
+    | feature {$$=single_Features($1);}
+    | feature_list feature {$$=append_Features($1, single_Features($2));}
+    | error ';' {}
     ;
     
+    formal: OBJECTID ':' TYPEID {$$=formal($1, $3);};
+
+    formal_list: /*empy*/ {$$=nil_Formals();}
+    | formal {$$=single_Formals($1);};
+    | formal_list ',' formal 
+    {
+      $$=append_Formals($1, single_Formals($3));
+    }
+    ;
+
+    expression: INT_CONST 
+    {
+      $$ = int_const($1);
+    }
+    | STR_CONST 
+    {
+      $$ = string_const($1);
+    }
+    | BOOL_CONST
+    {
+      $$ = bool_const($1);
+    }
+    | expression '+' expression
+    {
+      $$ = plus($1, $3);
+    }
+    | expression '-' expression
+    {
+      $$ = sub($1, $3);
+    }
+    | expression '*' expression
+    {
+      $$ = mul($1, $3);
+    }
+    | expression '/' expression
+    {
+      $$ = divide($1, $3);
+    }
+    | expression '=' expression 
+    {
+      $$=eq($1, $3);
+    }
+    | '~' expression 
+    {
+      $$=neg($2);
+    }
+    | expression '<' expression {$$=lt($1, $3);}
+    | expression LE expression {$$=leq($1, $3);}
+    | OBJECTID {$$=object($1);}
+    | OBJECTID ':' TYPEID ASSIGN expression 
+    {
+      $$=assign($1, $5);
+    }
+    | OBJECTID ASSIGN expression 
+    {
+      $$=assign($1, $3);
+    }
+    | NOT expression {$$=comp($2);}
+    | '(' expression ')' {$$=$2;}
+    | '{' expression_block '}' {$$ = block($2);}
+    | LET let_list {$$=$2;}
+    | if
+    | dispatch
+    | while
+    | typecase
+    | new
+    | is_void
+    | error {}
+    ;
+
+    let_list: OBJECTID ':' TYPEID IN expression
+    {
+      
+      $$ = let($1, $3, no_expr(), $5);
+    }
+    | OBJECTID ':' TYPEID ASSIGN expression IN expression
+    {
+      
+      $$ = let($1, $3, $5, $7);
+    }
+    | OBJECTID ':' TYPEID ',' let_list
+    {
+      $$=let($1, $3, no_expr(), $5);
+    }
+    | OBJECTID ':' TYPEID ASSIGN expression ',' let_list
+    {
+      $$=let($1, $3, $5, $7);
+    }
+    ;
+
+    expression_list: /**/ {$$=nil_Expressions();}
+    | expression
+    {
+      $$ = single_Expressions($1);
+    }
+    | expression_list ',' expression
+    {
+      $$ = append_Expressions($1, single_Expressions($3));
+    }
+    ;
+
+    expression_block
+    : expression ';'
+    {
+      $$ = single_Expressions($1);
+    }
+    | expression_block expression ';'
+    {
+      $$ = append_Expressions($1, single_Expressions($2));
+    }
+    | error {}
+    ;
+
+    new: NEW TYPEID {$$=new_($2);};
+
+    is_void: ISVOID expression {$$=isvoid($2);};
+
+    branch: OBJECTID ':' TYPEID DARROW expression ';' {$$=branch($1, $3, $5);};
+
+    branch_list:branch{$$=single_Cases($1);}
+    | branch_list branch {$$=append_Cases($1, single_Cases($2));}
+    ;
+
+    typecase: CASE expression OF branch_list ESAC {$$=typcase($2, $4);};
+
+    while: WHILE expression LOOP expression POOL {$$=loop($2, $4);};
+
+    dispatch: OBJECTID '(' expression_list ')' 
+    {
+      Entry *self = idtable.add_string("self");
+      $$=dispatch(object(self), $1, $3);
+    }
+    | expression '.' OBJECTID '(' expression_list ')' {$$=dispatch($1, $3, $5);}
+    | expression '@' TYPEID '.' OBJECTID '(' expression_list ')' {$$=static_dispatch($1, $3, $5, $7);}
+    ;
+
+    if: IF expression THEN expression ELSE expression FI {$$=cond($2, $4, $6);};
+
+   
+
+
+
     /* Feature list may be empty, but no empty features in list. */
-    dummy_feature_list:		/* empty */
-    {  $$ = nil_Features(); }
     
     
     /* end of grammar */
@@ -185,5 +370,3 @@
       
       if(omerrs>50) {fprintf(stdout, "More than 50 errors\n"); exit(1);}
     }
-    
-    
