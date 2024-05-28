@@ -6,6 +6,11 @@
 #include "cool-tree.h"
 #include "symtab.h"
 
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/IRBuilder.h"
+
+
 enum Basicness     {Basic, NotBasic};
 #define TRUE 1
 #define FALSE 0

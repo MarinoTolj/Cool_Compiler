@@ -4,16 +4,38 @@
 # -Wno-unused da ne upozorava ako se ne koristi return value
 # -Wno-write-strings miče upozorenje za konverziju string konst u char*
 # -I dodaje putanju do headera
+CFLAGS = -g -Wall -Wno-unused -Wno-deprecated -Wno-write-strings -Wno-nonnull-compare -Wno-register -DDEBUG -I. -DLLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING
 
+# LLVM configuration flags
+LLVM_CFLAGS := $(shell llvm-config --cxxflags)
+LLVM_LDFLAGS := $(shell llvm-config --ldflags)
+LLVM_LIBS := $(shell llvm-config --libs)
+LLVM_SYSTEM_LIBS := $(shell llvm-config --system-libs)
 
-CFLAGS= -g -Wall -Wno-unused -Wno-deprecated -Wno-write-strings -Wno-nonnull-compare -Wno-register -DDEBUG -I.
+# Include LLVM flags
+CFLAGS += $(LLVM_CFLAGS)
+LDFLAGS = $(LLVM_LDFLAGS) $(LLVM_LIBS) $(LLVM_SYSTEM_LIBS)
+
 
 .PHONY: codegen
 .PHONY: codegen_test
+.PHONY: test
 
-codegen:	
+FILE = ./hello_world.cl
+
+# Define the test rule
+test:
+	./lexer $(FILE) && \
+	./parser $(FILE) && \
+	./semant $(FILE) && \
+	./codegen $(FILE)
+#test: ./lexer ./hello_world.cl | ./parser ./hello_world.cl | ./semant ./hello_world.cl | ./codegen ./hello_world.cl
+#llc x.ll -> .s
+#clang++ -S -emit-llvm x.cpp
+
+codegen:
 # kompajlira pomocne datoteke bez linkanja
-# -c samo kompajlira, ne linka
+# -c samo kompajlira, ne linka	
 	g++ ${CFLAGS} -c cgen.cc
 	g++ ${CFLAGS} -c cgen_supp.cc
 	g++ ${CFLAGS} -c cgen-phase.cc
@@ -27,8 +49,8 @@ codegen:
 	g++ ${CFLAGS} -c handle_flags.cc
 # na kraju linka sve kompajlirane datoteke skupa
 # -lfl je uključivanje biblioteke libfl.a od flexa
-# -o je ime izlazne datoteke
-	g++ ${CFLAGS} ast-lex.o ast-parse.o cgen.o cgen-phase.o cgen_supp.o cool-tree.o dumptype.o handle_flags.o stringtab.o tree.o utilities.o -lfl -o codegen
-	
+# -o je ime izlazne datoteke	
+	g++ ${CFLAGS} ast-lex.o ast-parse.o cgen.o cgen-phase.o cgen_supp.o cool-tree.o dumptype.o handle_flags.o stringtab.o tree.o utilities.o -lfl ${LDFLAGS} -o codegen
+
 codegen_test:
-	g++ codegen_test.cpp -o codegen_test
+	g++ ${CFLAGS} codegen_test.cpp ${LDFLAGS} -o codegen_test

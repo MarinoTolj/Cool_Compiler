@@ -60,7 +60,8 @@
 #define BOOL_SLOTS        1
 
 #define GLOBAL        "\t.globl\t"
-#define ALIGN         "\t.align\t2\n"
+//ALIGN -> ALIGN1 because of name collision with LLVM
+#define ALIGN1         "\t.align\t2\n"
 #define WORD          "\t.word\t"
 
 //
@@ -68,16 +69,21 @@
 //
 #define ZERO "$zero"		// Zero register 
 #define ACC  "$a0"		// Accumulator 
-#define A1   "$a1"		// For arguments to prim funcs 
+
+//A1 -> A11 because of name collision with LLVM
+#define A11   "$a1"		// For arguments to prim funcs 
 #define SELF "$s0"		// Ptr to self (callee saves) 
-#define T1   "$t1"		// Temporary 1 
-#define T2   "$t2"		// Temporary 2 
+//T1 -> T11 because of name collision with LLVM
+#define T11   "$t1"		// Temporary 1 
+//T2 -> T21 because of name collision with LLVM
+#define T21   "$t2"		// Temporary 2 
 #define T3   "$t3"		// Temporary 3 
 #define T4   "$t4"		// Temporary 4 
 #define T5   "$t5"		// Temporary 5 
 #define T6   "$t6"		// Temporary 6
 #define T7   "$t7"		// Temporary 7
-#define SP   "$sp"		// Stack pointer 
+//SP -> SP1 because of name collision with LLVM
+#define SP1   "$sp"		// Stack pointer 
 #define FP   "$fp"		// Frame pointer 
 #define RA   "$ra"		// Return address 
 
@@ -90,7 +96,8 @@
 
 #define SW    "\tsw\t"
 #define LW    "\tlw\t"
-#define LI    "\tli\t"
+//LI -> LI1 because of name collision with LLVM
+#define LI1    "\tli\t"
 #define LA    "\tla\t"
 
 #define MOVE  "\tmove\t"

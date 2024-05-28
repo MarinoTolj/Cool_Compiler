@@ -180,7 +180,7 @@ static void emit_store(char *source_reg, int offset, char *dest_reg, ostream& s)
 }
 
 static void emit_load_imm(char *dest_reg, int val, ostream& s)
-{ s << LI << dest_reg << " " << val << endl; }
+{ s << LI1 << dest_reg << " " << val << endl; }
 
 static void emit_load_address(char *dest_reg, char *address, ostream& s)
 { s << LA << dest_reg << " " << address << endl; }
@@ -330,13 +330,13 @@ static void emit_branch(int l, ostream& s)
 //
 static void emit_push(char *reg, ostream& str)
 {
-  emit_store(reg,0,SP,str);
-  emit_addiu(SP,SP,-4,str);
+  emit_store(reg,0,SP1,str);
+  emit_addiu(SP1,SP1,-4,str);
 }
 
 static void emit_pop(char *reg, ostream &str) {
-    emit_addiu(SP, SP, 4, str);
-    emit_load(reg, 0, SP, str);
+    emit_addiu(SP1, SP1, 4, str);
+    emit_load(reg, 0, SP1, str);
 }
 
 //
@@ -362,16 +362,16 @@ static void emit_store_int(char *source, char *dest, ostream& s)
 static void emit_test_collector(ostream &s)
 {
   emit_push(ACC, s);
-  emit_move(ACC, SP, s); // stack end
-  emit_move(A1, ZERO, s); // allocate nothing
+  emit_move(ACC, SP1, s); // stack end
+  emit_move(A11, ZERO, s); // allocate nothing
   s << JAL << gc_collect_names[cgen_Memmgr] << endl;
-  emit_addiu(SP,SP,4,s);
-  emit_load(ACC,0,SP,s);
+  emit_addiu(SP1,SP1,4,s);
+  emit_load(ACC,0,SP1,s);
 }
 
 static void emit_gc_check(char *source, ostream &s)
 {
-  if (source != (char*)A1) emit_move(A1, source, s);
+  if (source != (char*)A11) emit_move(A11, source, s);
   s << JAL << "_gc_check" << endl;
 }
 
@@ -434,7 +434,7 @@ void StringEntry::code_def(ostream& s, int stringclasstag)
       s << endl;                                              // dispatch table
       s << WORD;  lensym->code_ref(s);  s << endl;            // string length
       emit_string_constant(s,str);                                // ascii string
-      s << ALIGN;                                                 // align to word
+      s << ALIGN1;                                                 // align to word
 }
 
 //
@@ -541,7 +541,7 @@ void CgenClassTable::code_global_data()
   Symbol integer = idtable.lookup_string(INTNAME);
   Symbol boolc   = idtable.lookup_string(BOOLNAME);
 
-  str << "\t.data\n" << ALIGN;
+  str << "\t.data\n" << ALIGN1;
   //
   // The following global names must be defined first.
   //
@@ -652,7 +652,7 @@ void set_tags(CgenNodeP node) {
 	}
 }
 
-
+//TODO: pocetak
 CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
 {
 
@@ -669,6 +669,11 @@ CgenClassTable::CgenClassTable(Classes classes, ostream& s) : nds(NULL) , str(s)
    boolclasstag =   probe(Bool)->tag; /* Change to your Bool class tag here */;
 
    code();
+//    ofstream test("./llvm/test.ll");
+//    for(List<CgenNode>* cld = this->root()->get_children(); cld != NULL; cld = cld->tl()) {
+// 	    //code_class_name(cld->hd());
+//         cld->hd()->dump_with_types(cout, 0);
+// 	}
    exitscope();
 }
 
@@ -854,10 +859,12 @@ void CgenNode::set_parentnd(CgenNodeP p)
   parentnd = p;
 }
 
+//Vecina koda ispod je novo.
 void CgenClassTable::code_class_name_table() {
     str << CLASSNAMETAB << LABEL;
     code_class_name(root());
 }
+
 
 void CgenClassTable::code_class_name(CgenNodeP node) {
 	str << WORD;
@@ -959,19 +966,19 @@ void CgenClassTable::code_prototype_objects(CgenNodeP node) {
 }
 
 static void emit_func_before(int tmps, ostream &s) {
-    emit_addiu(SP, SP, -(3 + tmps) * WORD_SIZE, s);
-    emit_store(FP, 3 + tmps, SP, s);
-    emit_store(SELF, 2 + tmps, SP, s);
-    emit_store(RA, 1 + tmps, SP, s);
-    emit_addiu(FP, SP, WORD_SIZE, s);
+    emit_addiu(SP1, SP1, -(3 + tmps) * WORD_SIZE, s);
+    emit_store(FP, 3 + tmps, SP1, s);
+    emit_store(SELF, 2 + tmps, SP1, s);
+    emit_store(RA, 1 + tmps, SP1, s);
+    emit_addiu(FP, SP1, WORD_SIZE, s);
     emit_move(SELF, ACC, s);
 }
 
 static void emit_func_after(int tmps, int fms, ostream &s) {
-    emit_load(FP, 3 + tmps, SP, s);
-    emit_load(SELF, 2 + tmps, SP, s);
-    emit_load(RA, 1 + tmps, SP, s);
-    emit_addiu(SP, SP, (3 + tmps + fms) * WORD_SIZE, s);
+    emit_load(FP, 3 + tmps, SP1, s);
+    emit_load(SELF, 2 + tmps, SP1, s);
+    emit_load(RA, 1 + tmps, SP1, s);
+    emit_addiu(SP1, SP1, (3 + tmps + fms) * WORD_SIZE, s);
     emit_return(s);
 }
 
@@ -1214,19 +1221,19 @@ void static_dispatch_class::code(ostream &s) {
         ACC, stringtable.lookup_string(cur_node->get_filename()->get_string()),
         s);
     // line number in t1
-    emit_load_imm(T1, cur_node->get_line_number(), s);
+    emit_load_imm(T11, cur_node->get_line_number(), s);
     emit_jal("_dispatch_abort", s);
     emit_label_def(ok, s);
     // load static disptable
-    s << LA << T1 << " ";
+    s << LA << T11 << " ";
     emit_disptable_ref(type_name, s);
     s << endl;
     // lookup method offset in disptable
     int offset =
         class_table->probe(this->type_name)->get_meth_offset(this->name);
-    emit_load(T1, offset, T1, s);
+    emit_load(T11, offset, T11, s);
     // call it
-    emit_jalr(T1, s);
+    emit_jalr(T11, s);
 }
 int static_dispatch_class::cnt_max_tmps() {
     int cnt = expr->cnt_max_tmps();
@@ -1254,23 +1261,23 @@ void dispatch_class::code(ostream &s) {
         ACC, stringtable.lookup_string(cur_node->get_filename()->get_string()),
         s);
 // kodiram broj linije
-    emit_load_imm(T1, cur_node->get_line_number(), s);
+    emit_load_imm(T11, cur_node->get_line_number(), s);
 // pozivam runtime funkciju za prekid poziva
     emit_jal("_dispatch_abort", s);
 
 // nije void - nastavljam izvršenje
     emit_label_def(ok, s);
 // učitavam tablicu poziva
-    emit_load(T1, DISPTABLE_OFFSET, ACC, s);
+    emit_load(T11, DISPTABLE_OFFSET, ACC, s);
 // koja je klasa objekt?
     Symbol tp = expr->get_type();
     tp = tp == SELF_TYPE ? cur_node->get_name() : tp;
 // tražim funkciju unutar tablice poziva
 	CgenNode* node = class_table->probe(tp);
     int offset = node->get_meth_offset(this->name);
-    emit_load(T1, offset, T1, s);
+    emit_load(T11, offset, T11, s);
 // poziv same funkcije
-    emit_jalr(T1, s);
+    emit_jalr(T11, s);
 }
 
 int dispatch_class::cnt_max_tmps() {
@@ -1288,8 +1295,8 @@ void cond_class::code(ostream &s) {
 // najprije kodiram predikat
     pred->code(s);
 // ovisno o vrijednosti skačem
-    emit_fetch_bool(T1, ACC, s);
-    emit_beqz(T1, else_lbl, s);
+    emit_fetch_bool(T11, ACC, s);
+    emit_beqz(T11, else_lbl, s);
 // onda kodiram then
     then_exp->code(s);
     emit_branch(end, s);
@@ -1311,8 +1318,8 @@ void loop_class::code(ostream &s) {
 // kodiraj predikat
     pred->code(s);
 // provjeri mu vrijednost i granaj
-    emit_fetch_bool(T1, ACC, s);
-    emit_beq(T1, ZERO, end, s);
+    emit_fetch_bool(T11, ACC, s);
+    emit_beq(T11, ZERO, end, s);
 // kodiraj tijelo
     body->code(s);
     emit_branch(start, s);
@@ -1335,7 +1342,7 @@ void typcase_class::code(ostream &s) {
         ACC, stringtable.lookup_string(cur_node->get_filename()->get_string()),
         s);
 // line number in t1
-    emit_load_imm(T1, cur_node->get_line_number(), s);
+    emit_load_imm(T11, cur_node->get_line_number(), s);
 // ako je void abort
     emit_jal("_case_abort2", s);
 
@@ -1366,7 +1373,7 @@ void typcase_class::code(ostream &s) {
         nxt = new_label();
         emit_label_def(cur, s);
 // koji je tag?
-        emit_load(T2, 0, ACC, s);
+        emit_load(T21, 0, ACC, s);
 // min and max tag??
         CgenNode* nd = class_table->probe(cas->get_type());
         int min_tag = nd->tag;
@@ -1375,8 +1382,8 @@ void typcase_class::code(ostream &s) {
             for(List<CgenNode>* c = nd->get_children(); c; c = c->tl())
                 nd = c->hd();
         int max_tag = nd->tag;
-        emit_blti(T2, min_tag, nxt, s);
-        emit_bgti(T2, max_tag, nxt, s);
+        emit_blti(T21, min_tag, nxt, s);
+        emit_bgti(T21, max_tag, nxt, s);
 // tag se podudara, dodaj u tmp tablicu
     	int* pint = new int;
     	*pint = tmp_cnt++;
@@ -1461,11 +1468,11 @@ void plus_class::code(ostream &s) {
     e2->code(s);
 // iskopiraj ga ka novi objekt ????
     emit_method_call(Object, ::copy, s);
-    emit_pop(T1, s);
-    emit_fetch_int(T1, T1, s);
-    emit_fetch_int(T2, ACC, s);
-    emit_add(T1, T1, T2, s);
-    emit_store_int(T1, ACC, s);
+    emit_pop(T11, s);
+    emit_fetch_int(T11, T11, s);
+    emit_fetch_int(T21, ACC, s);
+    emit_add(T11, T11, T21, s);
+    emit_store_int(T11, ACC, s);
 }
 int plus_class::cnt_max_tmps() {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
@@ -1476,11 +1483,11 @@ void sub_class::code(ostream &s) {
     emit_push(ACC, s);
     e2->code(s);
     emit_method_call(Object, ::copy, s);
-    emit_pop(T1, s);
-    emit_fetch_int(T1, T1, s);
-    emit_fetch_int(T2, ACC, s);
-    emit_sub(T1, T1, T2, s);
-    emit_store_int(T1, ACC, s);
+    emit_pop(T11, s);
+    emit_fetch_int(T11, T11, s);
+    emit_fetch_int(T21, ACC, s);
+    emit_sub(T11, T11, T21, s);
+    emit_store_int(T11, ACC, s);
 }
 int sub_class::cnt_max_tmps() {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
@@ -1491,11 +1498,11 @@ void mul_class::code(ostream &s) {
     emit_push(ACC, s);
     e2->code(s);
     emit_method_call(Object, ::copy, s);
-    emit_pop(T1, s);
-    emit_fetch_int(T1, T1, s);
-    emit_fetch_int(T2, ACC, s);
-    emit_mul(T1, T1, T2, s);
-    emit_store_int(T1, ACC, s);
+    emit_pop(T11, s);
+    emit_fetch_int(T11, T11, s);
+    emit_fetch_int(T21, ACC, s);
+    emit_mul(T11, T11, T21, s);
+    emit_store_int(T11, ACC, s);
 }
 int mul_class::cnt_max_tmps() {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
@@ -1506,11 +1513,11 @@ void divide_class::code(ostream &s) {
     emit_push(ACC, s);
     e2->code(s);
     emit_method_call(Object, ::copy, s);
-    emit_pop(T1, s);
-    emit_fetch_int(T1, T1, s);
-    emit_fetch_int(T2, ACC, s);
-    emit_div(T1, T1, T2, s);
-    emit_store_int(T1, ACC, s);
+    emit_pop(T11, s);
+    emit_fetch_int(T11, T11, s);
+    emit_fetch_int(T21, ACC, s);
+    emit_div(T11, T11, T21, s);
+    emit_store_int(T11, ACC, s);
 }
 int divide_class::cnt_max_tmps() {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
@@ -1519,9 +1526,9 @@ int divide_class::cnt_max_tmps() {
 void neg_class::code(ostream &s) {
     e1->code(s);
     emit_method_call(Object, ::copy, s);
-    emit_fetch_int(T1, ACC, s);
-    emit_neg(T1, T1, s);
-    emit_store_int(T1, ACC, s);
+    emit_fetch_int(T11, ACC, s);
+    emit_neg(T11, T11, s);
+    emit_store_int(T11, ACC, s);
 }
 int neg_class::cnt_max_tmps() { return e1->cnt_max_tmps(); }
 
@@ -1531,13 +1538,13 @@ void lt_class::code(ostream &s) {
     emit_push(ACC, s);
 // kodiram desni operand
     e2->code(s);
-    emit_pop(T1, s);
-    emit_fetch_int(T1, T1, s);
-    emit_fetch_int(T2, ACC, s);
+    emit_pop(T11, s);
+    emit_fetch_int(T11, T11, s);
+    emit_fetch_int(T21, ACC, s);
 // vraćam true ili false
     int lbl = new_label();
     emit_load_bool(ACC, truebool, s);
-    emit_blt(T1, T2, lbl, s);
+    emit_blt(T11, T21, lbl, s);
     emit_load_bool(ACC, falsebool, s);
     emit_label_def(lbl, s);
 }
@@ -1553,14 +1560,14 @@ void eq_class::code(ostream &s) {
 // kodiraj desni izraz
     e2->code(s);
 //baci ga na stog
-    emit_pop(T1, s);
-    emit_move(T2, ACC, s);
+    emit_pop(T11, s);
+    emit_move(T21, ACC, s);
 
 // ovisno o rezultatu vrati vrijednost
     int ok = new_label();
-    emit_load_bool(A1, falsebool, s);
+    emit_load_bool(A11, falsebool, s);
     emit_load_bool(ACC, truebool, s);
-    emit_beq(T1, T2, ok, s);
+    emit_beq(T11, T21, ok, s);
     emit_jal("equality_test", s);
     emit_label_def(ok, s);
 }
@@ -1572,12 +1579,12 @@ void leq_class::code(ostream &s) {
     e1->code(s);
     emit_push(ACC, s);
     e2->code(s);
-    emit_pop(T1, s);
-    emit_fetch_int(T1, T1, s);
-    emit_fetch_int(T2, ACC, s);
+    emit_pop(T11, s);
+    emit_fetch_int(T11, T11, s);
+    emit_fetch_int(T21, ACC, s);
     int lbl = new_label();
     emit_load_bool(ACC, truebool, s);
-    emit_bleq(T1, T2, lbl, s);
+    emit_bleq(T11, T21, lbl, s);
     emit_load_bool(ACC, falsebool, s);
     emit_label_def(lbl, s);
 }
@@ -1587,10 +1594,10 @@ int leq_class::cnt_max_tmps() {
 
 void comp_class::code(ostream &s) {
     e1->code(s);
-    emit_fetch_bool(T1, ACC, s);
+    emit_fetch_bool(T11, ACC, s);
     emit_load_bool(ACC, truebool, s);
     int lbl = new_label();
-    emit_beqz(T1, lbl, s);
+    emit_beqz(T11, lbl, s);
     emit_load_bool(ACC, falsebool, s);
     emit_label_def(lbl, s);
 }
@@ -1620,15 +1627,15 @@ int bool_const_class::cnt_max_tmps() { return 0; }
 void new__class::code(ostream &s) {
     if (type_name == SELF_TYPE) {
 // ako je selftype
-        emit_load_address(T1, CLASSOBJTAB, s);
-        emit_load(T2, 0, SELF, s);
-        emit_sll(T2, T2, 3, s);    // tag at offset 8
-        emit_addu(T1, T1, T2, s);  // the addr of probtobj
-        emit_move(T3, T1, s);
-        emit_load(ACC, 0, T1, s);
+        emit_load_address(T11, CLASSOBJTAB, s);
+        emit_load(T21, 0, SELF, s);
+        emit_sll(T21, T21, 3, s);    // tag at offset 8
+        emit_addu(T11, T11, T21, s);  // the addr of probtobj
+        emit_move(T3, T11, s);
+        emit_load(ACC, 0, T11, s);
         emit_method_call(Object, ::copy, s);
-        emit_load(T1, 1, T3, s); // addr of init
-        emit_jalr(T1, s);
+        emit_load(T11, 1, T3, s); // addr of init
+        emit_jalr(T11, s);
     } else if (type_name == Bool)
 // ako je bool
         emit_load_bool(ACC, falsebool, s);
@@ -1651,12 +1658,12 @@ int new__class::cnt_max_tmps() { return 1; }
 void isvoid_class::code(ostream &s) {
 // najprije kodiram i pohranjujem izraz
 	e1->code(s);
-	emit_move(T1, ACC, s);
+	emit_move(T11, ACC, s);
 
 // onda ovisno o rezultatu učitavam ispravnu vrijednost
 	emit_load_bool(ACC, truebool, s);
 	int lbl = new_label();
-	emit_beqz(T1, lbl, s);
+	emit_beqz(T11, lbl, s);
 	emit_load_bool(ACC, falsebool, s);
 	emit_label_def(lbl, s);
 }
