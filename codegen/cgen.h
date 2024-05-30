@@ -9,9 +9,19 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Type.h"
+#include <llvm/IR/Verifier.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/IR/DerivedTypes.h>
+#include "llvm/ADT/StringRef.h"
 
-
-enum Basicness     {Basic, NotBasic};
+enum Basicness
+{
+   Basic,
+   NotBasic
+};
 #define TRUE 1
 #define FALSE 0
 
@@ -21,11 +31,11 @@ typedef CgenClassTable *CgenClassTableP;
 class CgenNode;
 typedef CgenNode *CgenNodeP;
 
-typedef std::vector<std::pair<Symbol,Symbol> > vecNameName;
-typedef std::vector<std::pair<Symbol,Symbol> >::iterator vecNameNameIter;
+typedef std::vector<std::pair<Symbol, Symbol>> vecNameName;
+typedef std::vector<std::pair<Symbol, Symbol>>::iterator vecNameNameIter;
 
-typedef std::vector<Feature_class*> vecFeature;
-typedef std::vector<Feature_class*>::iterator vecFeatureIter;
+typedef std::vector<Feature_class *> vecFeature;
+typedef std::vector<Feature_class *>::iterator vecFeatureIter;
 
 int tag_cnt = 0;
 int label_cnt = 0;
@@ -34,17 +44,37 @@ CgenNodeP cur_node;
 CgenClassTableP class_table;
 SymbolTable<Symbol, int> tmp_table;
 
-class CgenClassTable : public SymbolTable<Symbol,CgenNode> {
+class CgenClassTable : public SymbolTable<Symbol, CgenNode>
+{
 private:
    List<CgenNode> *nds;
-   ostream& str;
+   ostream &str;
    int stringclasstag;
    int intclasstag;
    int boolclasstag;
+   std::unique_ptr<llvm::LLVMContext> ctx;
+   std::unique_ptr<llvm::Module> module;
+   std::unique_ptr<llvm::IRBuilder<>> builder;
 
+   void module_init()
+   {
+      ctx = std::make_unique<llvm::LLVMContext>();
+      module = std::make_unique<llvm::Module>("CoolLLVM", *ctx);
+      builder = std::make_unique<llvm::IRBuilder<>>(*ctx);
+   }
+   void save_module_to_file(const std::string &filename)
+   {
+      std::error_code error_code;
+      llvm::raw_fd_ostream outLL(filename, error_code);
 
-// The following methods emit code for
-// constants and global declarations.
+      module->print(outLL, nullptr);
+   }
+
+   void code_class(CgenNode *cool_class);
+   llvm::Type *get_llvm_type(Symbol cool_type);
+
+   // The following methods emit code for
+   // constants and global declarations.
 
    void code_global_data();
    void code_global_text();
@@ -61,29 +91,30 @@ private:
    void code_object_initializers(CgenNodeP node);
    void code_class_methods(CgenNodeP node);
 
-// The following creates an inheritance graph from
-// a list of classes.  The graph is implemented as
-// a tree of `CgenNode', and class names are placed
-// in the base class symbol table.
+   // The following creates an inheritance graph from
+   // a list of classes.  The graph is implemented as
+   // a tree of `CgenNode', and class names are placed
+   // in the base class symbol table.
 
    void install_basic_classes();
    void install_class(CgenNodeP nd);
    void install_classes(Classes cs);
    void build_inheritance_tree();
    void set_relations(CgenNodeP nd);
+
 public:
-   CgenClassTable(Classes, ostream& str);
+   CgenClassTable(Classes, ostream &str);
    void code();
    CgenNodeP root();
 };
 
-
-class CgenNode : public class__class {
-private: 
-   CgenNodeP parentnd;                        // Parent of class
-   List<CgenNode> *children;                  // Children of class
-   Basicness basic_status;                    // `Basic' if class is basic
-                                              // `NotBasic' otherwise
+class CgenNode : public class__class
+{
+private:
+   CgenNodeP parentnd;       // Parent of class
+   List<CgenNode> *children; // Children of class
+   Basicness basic_status;   // `Basic' if class is basic
+                             // `NotBasic' otherwise
 
 public:
    int tag;
@@ -100,18 +131,17 @@ public:
    CgenNodeP get_parentnd() { return parentnd; }
    int basic() { return (basic_status == Basic); }
 
-
    int get_meth_offset(Symbol meth_name);
    int get_attr_offset(Symbol attr_name);
 };
 
-class BoolConst 
+class BoolConst
 {
- private: 
-  int val;
- public:
-  BoolConst(int);
-  void code_def(ostream&, int boolclasstag);
-  void code_ref(ostream&) const;
-};
+private:
+   int val;
 
+public:
+   BoolConst(int);
+   void code_def(ostream &, int boolclasstag);
+   void code_ref(ostream &) const;
+};

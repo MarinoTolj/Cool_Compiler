@@ -734,14 +734,73 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     boolclasstag = probe(Bool)->tag;  /* Change to your Bool class tag here */
 
     code();
-    //    ofstream test("./llvm/test.ll");
-    //    for(List<CgenNode>* cld = this->root()->get_children(); cld != NULL; cld = cld->tl()) {
-    // 	    //code_class_name(cld->hd());
-    //         cld->hd()->dump_with_types(cout, 0);
-    // 	}
+    // ofstream test("./llvm/test.ll");
+    module_init();
+    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    {
+        // cld->hd()->dump_with_types(test, 0);
+        code_class(cld->hd());
+    }
+    save_module_to_file("./hello_world.ll");
     exitscope();
 }
 
+// TODO: llvm code
+void CgenClassTable::code_class(CgenNode *cool_class)
+{
+    llvm::StructType *currClassType = llvm::StructType::create(*ctx.get(), cool_class->get_name()->get_string());
+    std::vector<llvm::Type *> mainClassFields;
+    auto fs = cool_class->get_features();
+    for (int i = fs->first(); fs->more(i); i = fs->next(i))
+    {
+        Feature_class *f = fs->nth(i);
+        if (!f->is_method())
+        {
+            mainClassFields.push_back(get_llvm_type(f->get_type()));
+        }
+        else
+        {
+
+            llvm::FunctionType *currFunctionType = llvm::FunctionType::get(get_llvm_type(f->get_type()), false);
+            llvm::Function *currFunction = llvm::Function::Create(currFunctionType, llvm::Function::ExternalLinkage, f->get_name()->get_string(), module.get());
+            llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", currFunction);
+            currClassType->setBody(mainClassFields);
+
+            builder->SetInsertPoint(entry);
+
+            llvm::Value *mainInstance = builder->CreateAlloca(currClassType, nullptr, "mainInstance");
+            llvm::verifyFunction(*currFunction);
+        }
+    }
+
+    // // Initialize x to 3
+    // llvm::Value *xPtr = builder->CreateStructGEP(mainClassType, mainInstance, 0, "xPtr");
+    // builder->CreateStore(builder->getInt32(3), xPtr);
+
+    // // Load x and return it
+    // llvm::Value *xValue = builder->CreateLoad(builder->getInt32Ty(), xPtr, "x");
+    // builder->CreateRet(xValue);
+}
+
+llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
+{
+    if (cool_type == Int)
+    {
+        return builder.get()->getInt32Ty();
+    }
+    else if (cool_type == Bool)
+    {
+        return builder.get()->getInt1Ty();
+    }
+    else if (cool_type == Str)
+    {
+        return builder.get()->getInt8PtrTy();
+    }
+    else
+    {
+        return builder.get()->getInt16Ty();
+    }
+}
 void CgenClassTable::install_basic_classes()
 {
 
@@ -1174,6 +1233,7 @@ void CgenClassTable::code_class_methods(CgenNodeP node)
         code_class_methods(cld->hd());
 }
 
+// TODO: code
 void CgenClassTable::code()
 {
     if (cgen_debug)
