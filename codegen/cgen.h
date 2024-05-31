@@ -11,10 +11,11 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Type.h"
 #include <llvm/IR/Verifier.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Value.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Scalar/GVN.h>
-#include <llvm/IR/DerivedTypes.h>
 #include "llvm/ADT/StringRef.h"
 
 enum Basicness
@@ -36,6 +37,9 @@ typedef std::vector<std::pair<Symbol, Symbol>>::iterator vecNameNameIter;
 
 typedef std::vector<Feature_class *> vecFeature;
 typedef std::vector<Feature_class *>::iterator vecFeatureIter;
+
+typedef std::unique_ptr<llvm::LLVMContext> Context;
+typedef std::unique_ptr<llvm::IRBuilder<>> Builder;
 
 int tag_cnt = 0;
 int label_cnt = 0;
