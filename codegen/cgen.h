@@ -40,6 +40,7 @@ typedef std::vector<Feature_class *>::iterator vecFeatureIter;
 
 typedef std::unique_ptr<llvm::LLVMContext> Context;
 typedef std::unique_ptr<llvm::IRBuilder<>> Builder;
+typedef std::unique_ptr<llvm::Module> Module;
 
 int tag_cnt = 0;
 int label_cnt = 0;
@@ -56,9 +57,9 @@ private:
    int stringclasstag;
    int intclasstag;
    int boolclasstag;
-   std::unique_ptr<llvm::LLVMContext> ctx;
-   std::unique_ptr<llvm::Module> module;
-   std::unique_ptr<llvm::IRBuilder<>> builder;
+   Context ctx;
+   Module module;
+   Builder builder;
 
    void module_init()
    {

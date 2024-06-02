@@ -734,49 +734,88 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     boolclasstag = probe(Bool)->tag;  /* Change to your Bool class tag here */
 
     code();
-    // ofstream test("./llvm/test.ll");
+    ofstream test("./llvm/test.ll");
     module_init();
     for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
     {
-        // cld->hd()->dump_with_types(test, 0);
+        cld->hd()->dump_with_types(test, 0);
         code_class(cld->hd());
     }
     save_module_to_file("./hello_world.ll");
     exitscope();
 }
+std::map<std::string, int> NamedValues;
 
 // TODO: llvm code
 void CgenClassTable::code_class(CgenNode *cool_class)
 {
-    llvm::StructType *currClassType = llvm::StructType::create(*ctx.get(), cool_class->get_name()->get_string());
-    std::vector<llvm::Type *> mainClassFields;
+    std::string class_name = cool_class->get_name()->get_string();
+
+    // Create struct representation of class
+    llvm::StructType *currClassType = llvm::StructType::create(*ctx.get(), class_name);
+
+    std::vector<llvm::Type *> classFields;
+    std::vector<llvm::Value *> classFieldsInit;
     auto fs = cool_class->get_features();
-    llvm::Value *res = nullptr;
     for (int i = fs->first(); fs->more(i); i = fs->next(i))
     {
         Feature_class *f = fs->nth(i);
         if (!f->is_method())
         {
-            mainClassFields.push_back(get_llvm_type(f->get_type()));
+            classFields.push_back(get_llvm_type(f->get_type()));
+            // Code gen expression of attribute and save value.
+            classFieldsInit.push_back(f->get_expr()->llvm_code(builder, module));
+            NamedValues[f->get_name()->get_string()] = i;
         }
-        else
+    }
+    currClassType->setBody(classFields);
+    // Create function which will initialize class.
+    llvm::FunctionType *classInitType = llvm::FunctionType::get(builder->getVoidTy(), currClassType->getPointerTo(), false);
+
+    llvm::Function *classInit = llvm::Function::Create(classInitType, llvm::Function::ExternalLinkage, class_name + "_Init", module.get());
+    llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", classInit);
+    builder->SetInsertPoint(entry);
+
+    llvm::AllocaInst *classInstance = nullptr;
+    if (classFields.size() >= 1)
+    {
+
+        int index = 0;
+
+        if (class_name == "Main")
+        {
+            for (auto &i : classFields)
+            {
+
+                auto ptr = builder->CreateStructGEP(currClassType, classInit->getArg(0), index);
+                llvm::Value *attribute = classFieldsInit[index];
+                if (attribute)
+                {
+                    builder->CreateStore(attribute, ptr);
+                }
+
+                index++;
+            }
+            // Return void
+            builder->CreateRet(nullptr);
+        }
+    }
+    llvm::Value *res = nullptr;
+
+    for (int i = fs->first(); fs->more(i); i = fs->next(i))
+    {
+        Feature_class *f = fs->nth(i);
+
+        if (f->is_method())
         {
 
             method_class *f_method = dynamic_cast<method_class *>(f);
-            auto expr = f_method->get_expr();
-            if (f_method->get_name()->equal_string("main", 4))
-            {
-
-                res = expr->llvm_code(builder, ctx);
-                cout << "res: " << endl;
-                res->dump();
-            }
 
             std::vector<llvm::Type *>
                 llvm_args;
 
             // Set first arg to class itself.
-            llvm_args.push_back(currClassType);
+            llvm_args.push_back(currClassType->getPointerTo());
 
             Formals fms = f_method->get_formals();
             for (int i = fms->first(); fms->more(i); i = fms->next(i))
@@ -790,7 +829,7 @@ void CgenClassTable::code_class(CgenNode *cool_class)
 
             llvm::Function *currFunction = llvm::Function::Create(currFunctionType, llvm::Function::ExternalLinkage, f_method->get_name()->get_string(), module.get());
             // Set first arg name to self.
-            currFunction->args().begin()->setName("self");
+            currFunction->getArg(0)->setName("self");
             for (int i = fms->first(); fms->more(i); i = fms->next(i))
             {
                 formal_class *formal_param = (formal_class *)fms->nth(i);
@@ -801,11 +840,21 @@ void CgenClassTable::code_class(CgenNode *cool_class)
             }
 
             llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", currFunction);
-            currClassType->setBody(mainClassFields);
-
             builder->SetInsertPoint(entry);
+            auto expr = f_method->get_expr();
+            if (f_method->get_name()->equal_string("main", 4))
+            {
+
+                // expr->llvm_code(builder, ctx);
+                res = expr->llvm_code(builder, module);
+            }
+
             if (res != nullptr)
             {
+
+                // llvm::ValueSymbolTable &symbolTable = currFunction->getValueSymbolTable();
+                // llvm::Value *return_val = *symbolTable.lookup(res->getName());
+                //  auto return_val = builder->CreateLoad(res->getType(), module->getStac);
 
                 builder->CreateRet(res);
                 res = nullptr;
@@ -828,6 +877,7 @@ llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
 {
     if (cool_type == Int)
     {
+
         return builder.get()->getInt32Ty();
     }
     else if (cool_type == Bool)
@@ -1395,7 +1445,19 @@ int CgenNode::get_attr_offset(Symbol attr_name)
 //   constant integers, strings, and booleans are provided.
 //
 //*****************************************************************
-llvm::Value *assign_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *assign_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *rhs_expr = expr->llvm_code(builder, module);
+    cout << "Before id" << endl;
+    // llvm::Value *id = NamedValues[name->get_string()];
+    llvm::Function *fn = builder->GetInsertBlock()->getParent();
+    auto bar = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), 0, "xFieldPtr");
+    bar->dump();
+    auto foo = builder->CreateStore(rhs_expr, bar);
+    cout << "After create: " << endl;
+    foo->dump();
+    return bar;
+}
 void assign_class::code(ostream &s)
 {
     // prvo izračunam vrijednost izraza
@@ -1406,7 +1468,7 @@ void assign_class::code(ostream &s)
     emit_store(ACC, pr.second, pr.first, s);
 }
 int assign_class::cnt_max_tmps() { return expr->cnt_max_tmps(); }
-llvm::Value *static_dispatch_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *static_dispatch_class::llvm_code(Builder &builder, Module &module) {}
 void static_dispatch_class::code(ostream &s)
 {
     for (int i = actual->first(); actual->more(i); i = actual->next(i))
@@ -1445,7 +1507,7 @@ int static_dispatch_class::cnt_max_tmps()
         cnt = max(cnt, actual->nth(i)->cnt_max_tmps());
     return cnt;
 }
-llvm::Value *dispatch_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module) {}
 void dispatch_class::code(ostream &s)
 {
     // kodiram argumente
@@ -1493,7 +1555,7 @@ int dispatch_class::cnt_max_tmps()
         cnt = max(cnt, actual->nth(i)->cnt_max_tmps());
     return cnt;
 }
-llvm::Value *cond_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *cond_class::llvm_code(Builder &builder, Module &module) {}
 void cond_class::code(ostream &s)
 {
     // radim nove labele za els i end
@@ -1518,7 +1580,7 @@ int cond_class::cnt_max_tmps()
     return max(pred->cnt_max_tmps(),
                max(then_exp->cnt_max_tmps(), else_exp->cnt_max_tmps()));
 }
-llvm::Value *loop_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *loop_class::llvm_code(Builder &builder, Module &module) {}
 void loop_class::code(ostream &s)
 {
     // napravi labele za početak i kraj
@@ -1540,7 +1602,7 @@ int loop_class::cnt_max_tmps()
 {
     return max(pred->cnt_max_tmps(), body->cnt_max_tmps());
 }
-llvm::Value *typcase_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *typcase_class::llvm_code(Builder &builder, Module &module) {}
 void typcase_class::code(ostream &s)
 {
     int end = new_label();
@@ -1626,7 +1688,22 @@ int typcase_class::cnt_max_tmps()
         cnt = max(cnt, cases->nth(i)->get_expr()->cnt_max_tmps() + 1);
     return cnt;
 }
-llvm::Value *block_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *block_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *res = nullptr;
+    for (int i = body->first(); body->more(i); i = body->next(i))
+    {
+
+        cout << "Before call" << endl;
+        res = body->nth(i)->llvm_code(builder, module);
+        cout << "res: ";
+        res->dump();
+
+        // llvm::AllocaInst *ptr = builder->CreateAlloca(res->getType(), res, "expr");
+    }
+
+    return res;
+}
 void block_class::code(ostream &s)
 {
     // izvršavam jednu po jednu naredbu
@@ -1640,7 +1717,7 @@ int block_class::cnt_max_tmps()
         cnt = max(cnt, body->nth(i)->cnt_max_tmps());
     return cnt;
 }
-llvm::Value *let_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *let_class::llvm_code(Builder &builder, Module &module) {}
 void let_class::code(ostream &s)
 {
     // ako nema inicijalizacije varijablu postavljam na default vrijednost
@@ -1681,11 +1758,11 @@ int let_class::cnt_max_tmps()
 {
     return max(init->cnt_max_tmps(), 1 + body->cnt_max_tmps());
 }
-llvm::Value *plus_class::llvm_code(Builder &builder, Context &ctx)
+llvm::Value *plus_class::llvm_code(Builder &builder, Module &module)
 {
-    llvm::Value *L = e1->llvm_code(builder, ctx);
+    llvm::Value *L = e1->llvm_code(builder, module);
 
-    llvm::Value *R = e2->llvm_code(builder, ctx);
+    llvm::Value *R = e2->llvm_code(builder, module);
 
     return builder->CreateAdd(L, R, "addtmp");
 }
@@ -1709,7 +1786,7 @@ int plus_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *sub_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *sub_class::llvm_code(Builder &builder, Module &module) {}
 
 void sub_class::code(ostream &s)
 {
@@ -1727,7 +1804,7 @@ int sub_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *mul_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *mul_class::llvm_code(Builder &builder, Module &module) {}
 void mul_class::code(ostream &s)
 {
     e1->code(s);
@@ -1744,7 +1821,7 @@ int mul_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *divide_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *divide_class::llvm_code(Builder &builder, Module &module) {}
 void divide_class::code(ostream &s)
 {
     e1->code(s);
@@ -1761,7 +1838,7 @@ int divide_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *neg_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *neg_class::llvm_code(Builder &builder, Module &module) {}
 void neg_class::code(ostream &s)
 {
     e1->code(s);
@@ -1771,7 +1848,7 @@ void neg_class::code(ostream &s)
     emit_store_int(T11, ACC, s);
 }
 int neg_class::cnt_max_tmps() { return e1->cnt_max_tmps(); }
-llvm::Value *lt_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *lt_class::llvm_code(Builder &builder, Module &module) {}
 void lt_class::code(ostream &s)
 {
     // kodiram livi operand
@@ -1793,7 +1870,7 @@ int lt_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *eq_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *eq_class::llvm_code(Builder &builder, Module &module) {}
 void eq_class::code(ostream &s)
 {
     // kodiraj livi izraz
@@ -1818,7 +1895,7 @@ int eq_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *leq_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *leq_class::llvm_code(Builder &builder, Module &module) {}
 void leq_class::code(ostream &s)
 {
     e1->code(s);
@@ -1837,7 +1914,7 @@ int leq_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *comp_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *comp_class::llvm_code(Builder &builder, Module &module) {}
 void comp_class::code(ostream &s)
 {
     e1->code(s);
@@ -1850,33 +1927,38 @@ void comp_class::code(ostream &s)
 }
 int comp_class::cnt_max_tmps() { return e1->cnt_max_tmps(); }
 
-llvm::Value *int_const_class::llvm_code(Builder &builder, Context &ctx)
+llvm::Value *int_const_class::llvm_code(Builder &builder, Module &module)
 {
     int real_int = atoi(inttable.lookup_string(token->get_string())->get_string());
-
-    return llvm::ConstantInt::get(*ctx, llvm::APInt(32, real_int));
+    return llvm::ConstantInt::get(builder->getContext(), llvm::APInt(32, real_int));
 }
 void int_const_class::code(ostream &s)
 {
     //
-    // Need to be sure we have an IntEntry *, not an arbitrary Symbol
+    // Need to be sure we have an IntEntry *, not an arbitrary is
     //
     emit_load_int(ACC, inttable.lookup_string(token->get_string()), s);
 }
 int int_const_class::cnt_max_tmps() { return 0; }
-llvm::Value *string_const_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *string_const_class::llvm_code(Builder &builder, Module &module) {}
 void string_const_class::code(ostream &s)
 {
     emit_load_string(ACC, stringtable.lookup_string(token->get_string()), s);
 }
 int string_const_class::cnt_max_tmps() { return 0; }
-llvm::Value *bool_const_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *bool_const_class::llvm_code(Builder &builder, Module &module) {}
 void bool_const_class::code(ostream &s)
 {
     emit_load_bool(ACC, BoolConst(val), s);
 }
 int bool_const_class::cnt_max_tmps() { return 0; }
-llvm::Value *new__class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *new__class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Function *classInit = module->getFunction((std::string)type_name->get_string() + "_Init");
+    llvm::AllocaInst *classInstance = builder->CreateAlloca(classInit->getArg(0)->getType()->getPointerElementType(), nullptr);
+    builder->CreateCall(classInit, classInstance);
+    return classInstance;
+}
 void new__class::code(ostream &s)
 {
     if (type_name == SELF_TYPE)
@@ -1911,7 +1993,7 @@ void new__class::code(ostream &s)
     }
 }
 int new__class::cnt_max_tmps() { return 1; }
-llvm::Value *isvoid_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *isvoid_class::llvm_code(Builder &builder, Module &module) {}
 void isvoid_class::code(ostream &s)
 {
     // najprije kodiram i pohranjujem izraz
@@ -1926,13 +2008,27 @@ void isvoid_class::code(ostream &s)
     emit_label_def(lbl, s);
 }
 int isvoid_class::cnt_max_tmps() { return e1->cnt_max_tmps(); }
-llvm::Value *no_expr_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *no_expr_class::llvm_code(Builder &builder, Module &module)
+{
+    return nullptr;
+}
 void no_expr_class::code(ostream &s)
 {
     // prazno
 }
 int no_expr_class::cnt_max_tmps() { return 0; }
-llvm::Value *object_class::llvm_code(Builder &builder, Context &ctx) {}
+llvm::Value *object_class::llvm_code(Builder &builder, Module &module)
+{
+    // std::pair<char *, int> ptr = lookup_var(name);
+    // cout << "name: " << name << ", first: " << ptr.first << ", 2nd: " << ptr.second << endl;
+    // cout << "type: " << endl;
+    // builder->GetInsertBlock()->getType()->dump();
+    // builder->GetInsertBlock()->dump();
+    // builder->CreateStructGEP(mainStructType, selfArg, 0, "xFieldPtr");
+    llvm::Function *fn = builder->GetInsertBlock()->getParent();
+    // = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), 0, "xFieldPtr");
+    return builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), NamedValues[name->get_string()], "xFieldPtr");
+}
 void object_class::code(ostream &s)
 {
     // je li self?

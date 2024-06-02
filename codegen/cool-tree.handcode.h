@@ -88,23 +88,23 @@ typedef Cases_class *Cases;
 #define branch_EXTRAS \
 	void dump_with_types(ostream &, int);
 
-#define Expression_EXTRAS                                                                                           \
-	Symbol type;                                                                                                    \
-	Symbol get_type() { return type; }                                                                              \
-	Expression set_type(Symbol s)                                                                                   \
-	{                                                                                                               \
-		type = s;                                                                                                   \
-		return this;                                                                                                \
-	}                                                                                                               \
-	virtual void code(ostream &) = 0;                                                                               \
-	virtual llvm::Value *llvm_code(std::unique_ptr<llvm::IRBuilder<>> &, std::unique_ptr<llvm::LLVMContext> &) = 0; \
-	virtual void dump_with_types(ostream &, int) = 0;                                                               \
-	void dump_type(ostream &, int);                                                                                 \
+#define Expression_EXTRAS                                                                                      \
+	Symbol type;                                                                                               \
+	Symbol get_type() { return type; }                                                                         \
+	Expression set_type(Symbol s)                                                                              \
+	{                                                                                                          \
+		type = s;                                                                                              \
+		return this;                                                                                           \
+	}                                                                                                          \
+	virtual void code(ostream &) = 0;                                                                          \
+	virtual llvm::Value *llvm_code(std::unique_ptr<llvm::IRBuilder<>> &, std::unique_ptr<llvm::Module> &) = 0; \
+	virtual void dump_with_types(ostream &, int) = 0;                                                          \
+	void dump_type(ostream &, int);                                                                            \
 	Expression_class() { type = (Symbol)NULL; }
 
-#define Expression_SHARED_EXTRAS                                                                        \
-	void code(ostream &);                                                                               \
-	llvm::Value *llvm_code(std::unique_ptr<llvm::IRBuilder<>> &, std::unique_ptr<llvm::LLVMContext> &); \
+#define Expression_SHARED_EXTRAS                                                                   \
+	void code(ostream &);                                                                          \
+	llvm::Value *llvm_code(std::unique_ptr<llvm::IRBuilder<>> &, std::unique_ptr<llvm::Module> &); \
 	void dump_with_types(ostream &, int);
 
 #endif
