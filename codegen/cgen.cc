@@ -24,7 +24,7 @@
 
 #include "cgen.h"
 #include "cgen_gc.h"
-
+#include <map>
 extern void emit_string_constant(ostream &str, char *s);
 extern int cgen_debug;
 
@@ -722,6 +722,8 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
 {
 
     enterscope();
+    module_init();
+
     if (cgen_debug)
         cout << "Building CgenClassTable" << endl;
     install_basic_classes();
@@ -734,141 +736,147 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     boolclasstag = probe(Bool)->tag;  /* Change to your Bool class tag here */
 
     code();
-    ofstream test("./llvm/test.ll");
-    module_init();
+    // For llvm
+    ofstream test("./llvm/hello_world.out");
+    llvm_code_object_initializers(root());
     for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
     {
         cld->hd()->dump_with_types(test, 0);
         code_class(cld->hd());
     }
-    save_module_to_file("./hello_world.ll");
+    save_module_to_file("./llvm/hello_world.ll");
     exitscope();
 }
 std::map<std::string, int> NamedValues;
 
-// TODO: llvm code
-void CgenClassTable::code_class(CgenNode *cool_class)
+void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
 {
-    std::string class_name = cool_class->get_name()->get_string();
+    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    {
 
-    // Create struct representation of class
-    llvm::StructType *currClassType = llvm::StructType::create(*ctx.get(), class_name);
+        CgenNode *coolClass = cld->hd();
+        std::string className = coolClass->get_name()->get_string();
+        Features fs = coolClass->get_features();
 
-    std::vector<llvm::Type *> classFields;
-    std::vector<llvm::Value *> classFieldsInit;
-    auto fs = cool_class->get_features();
+        llvm::StructType *currStructType = coolClass->get_struct_type();
+
+        // Create function which will initialize class.
+        llvm::FunctionType *classInitType = llvm::FunctionType::get(builder->getVoidTy(), currStructType->getPointerTo(), false);
+
+        llvm::Function *classInit = llvm::Function::Create(classInitType, llvm::Function::ExternalLinkage, className + CLASSINIT_SUFFIX, module.get());
+    }
+    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    {
+
+        CgenNode *coolClass = cld->hd();
+        std::string className = coolClass->get_name()->get_string();
+        Features fs = coolClass->get_features();
+
+        llvm::StructType *currStructType = coolClass->get_struct_type();
+
+        llvm::AllocaInst *classInstance = nullptr;
+        llvm::ArrayRef<llvm::Type *> structFields = currStructType->elements();
+
+        int index = 0;
+        llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
+        llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", classInit);
+        builder->SetInsertPoint(entry);
+        for (vecFeatureIter Iter = coolClass->attributes.begin();
+             Iter != coolClass->attributes.end(); ++Iter)
+        {
+
+            llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
+            Expression expr = (*Iter)->get_expr();
+            if (expr->is_no_expr())
+                continue;
+            llvm::Value *attribute = expr->llvm_code(builder, module);
+            if (attribute)
+            {
+                builder->CreateStore(attribute, ptr);
+            }
+
+            index++;
+        }
+        // Return void
+        builder->CreateRet(nullptr);
+    }
+}
+// TODO: llvm code
+void CgenClassTable::code_class(CgenNode *coolClass)
+{
+    std::string className = coolClass->get_name()->get_string();
+
+    // TODO: methods
+    //  Codegen for Methods
+    llvm::StructType *currStructType = coolClass->get_struct_type();
+
+    llvm::Value *res = nullptr;
+    Features fs = coolClass->get_features();
     for (int i = fs->first(); fs->more(i); i = fs->next(i))
     {
         Feature_class *f = fs->nth(i);
         if (!f->is_method())
+            continue;
+        method_class *f_method = dynamic_cast<method_class *>(f);
+        std::vector<llvm::Type *>
+            llvm_args;
+        if (!(className == "Main" && f_method->get_name()->equal_string("main", 4)))
         {
-            classFields.push_back(get_llvm_type(f->get_type()));
-            // Code gen expression of attribute and save value.
-            classFieldsInit.push_back(f->get_expr()->llvm_code(builder, module));
-            NamedValues[f->get_name()->get_string()] = i;
-        }
-    }
-    currClassType->setBody(classFields);
-    // Create function which will initialize class.
-    llvm::FunctionType *classInitType = llvm::FunctionType::get(builder->getVoidTy(), currClassType->getPointerTo(), false);
-
-    llvm::Function *classInit = llvm::Function::Create(classInitType, llvm::Function::ExternalLinkage, class_name + "_Init", module.get());
-    llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", classInit);
-    builder->SetInsertPoint(entry);
-
-    llvm::AllocaInst *classInstance = nullptr;
-    if (classFields.size() >= 1)
-    {
-
-        int index = 0;
-
-        if (class_name == "Main")
-        {
-            for (auto &i : classFields)
-            {
-
-                auto ptr = builder->CreateStructGEP(currClassType, classInit->getArg(0), index);
-                llvm::Value *attribute = classFieldsInit[index];
-                if (attribute)
-                {
-                    builder->CreateStore(attribute, ptr);
-                }
-
-                index++;
-            }
-            // Return void
-            builder->CreateRet(nullptr);
-        }
-    }
-    llvm::Value *res = nullptr;
-
-    for (int i = fs->first(); fs->more(i); i = fs->next(i))
-    {
-        Feature_class *f = fs->nth(i);
-
-        if (f->is_method())
-        {
-
-            method_class *f_method = dynamic_cast<method_class *>(f);
-
-            std::vector<llvm::Type *>
-                llvm_args;
-
             // Set first arg to class itself.
-            llvm_args.push_back(currClassType->getPointerTo());
-
-            Formals fms = f_method->get_formals();
-            for (int i = fms->first(); fms->more(i); i = fms->next(i))
-            {
-                formal_class *formal_param = (formal_class *)fms->nth(i);
-
-                llvm_args.push_back(get_llvm_type(formal_param->get_type_decl()));
-            }
-
-            llvm::FunctionType *currFunctionType = llvm::FunctionType::get(get_llvm_type(f_method->return_type), llvm_args, false);
-
-            llvm::Function *currFunction = llvm::Function::Create(currFunctionType, llvm::Function::ExternalLinkage, f_method->get_name()->get_string(), module.get());
+            llvm_args.push_back(currStructType->getPointerTo());
+        }
+        Formals fms = f_method->get_formals();
+        for (int i = fms->first(); fms->more(i); i = fms->next(i))
+        {
+            formal_class *formal_param = (formal_class *)fms->nth(i);
+            llvm_args.push_back(get_llvm_type(formal_param->get_type_decl()));
+        }
+        llvm::FunctionType *currFunctionType = llvm::FunctionType::get(get_llvm_type(f_method->return_type), llvm_args, false);
+        llvm::Function *currFunction = llvm::Function::Create(currFunctionType, llvm::Function::ExternalLinkage, f_method->get_name()->get_string(), module.get());
+        llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", currFunction);
+        builder->SetInsertPoint(entry);
+        if (className == "Main" && f_method->get_name()->equal_string("main", 4))
+        {
+            // Allocate and call init function only for class main inside main method.
+            llvm::AllocaInst *classInstance = builder->CreateAlloca(currStructType, nullptr);
+            llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
+            builder->CreateCall(classInit, classInstance);
+        }
+        else
+        {
             // Set first arg name to self.
             currFunction->getArg(0)->setName("self");
-            for (int i = fms->first(); fms->more(i); i = fms->next(i))
-            {
-                formal_class *formal_param = (formal_class *)fms->nth(i);
-
-                //+1 to skip first arg.
-                auto nth_arg = currFunction->args().begin() + i + 1;
-                nth_arg->setName(formal_param->get_name()->get_string());
-            }
-
-            llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", currFunction);
-            builder->SetInsertPoint(entry);
-            auto expr = f_method->get_expr();
-            if (f_method->get_name()->equal_string("main", 4))
-            {
-
-                // expr->llvm_code(builder, ctx);
-                res = expr->llvm_code(builder, module);
-            }
-
-            if (res != nullptr)
-            {
-
-                // llvm::ValueSymbolTable &symbolTable = currFunction->getValueSymbolTable();
-                // llvm::Value *return_val = *symbolTable.lookup(res->getName());
-                //  auto return_val = builder->CreateLoad(res->getType(), module->getStac);
-
-                builder->CreateRet(res);
-                res = nullptr;
-            }
-            // llvm::Value *mainInstance = builder->CreateAlloca(currClassType, nullptr, "mainInstance");
-            llvm::verifyFunction(*currFunction);
         }
+        // for (int i = fms->first(); fms->more(i); i = fms->next(i))
+        // {
+        //     formal_class *formal_param = (formal_class *)fms->nth(i);
+        //     //+1 to skip first arg.
+        //     auto nth_arg = currFunction->args().begin() + i + 1;
+        //     nth_arg->setName(formal_param->get_name()->get_string());
+        // }
+        Expression expr = f_method->get_expr();
+        if (f_method->get_name()->equal_string("main", 4))
+        {
+            // expr->llvm_code(builder, ctx);
+            res = expr->llvm_code(builder, module);
+            cout << "Res:" << endl;
+            res->dump();
+        }
+        if (res != nullptr)
+        {
+            // llvm::ValueSymbolTable &symbolTable = currFunction->getValueSymbolTable();
+            // llvm::Value *return_val = *symbolTable.lookup(res->getName());
+            //  auto return_val = builder->CreateLoad(res->getType(), module->getStac);
+            builder->CreateRet(res);
+            res = nullptr;
+        }
+        // llvm::Value *mainInstance = builder->CreateAlloca(currClassType, nullptr, "mainInstance");
+        llvm::verifyFunction(*currFunction);
     }
-
-    // // Initialize x to 3
+    // Initialize x to 3
     // llvm::Value *xPtr = builder->CreateStructGEP(mainClassType, mainInstance, 0, "xPtr");
     // builder->CreateStore(builder->getInt32(3), xPtr);
-
-    // // Load x and return it
+    // Load x and return it
     // llvm::Value *xValue = builder->CreateLoad(builder->getInt32Ty(), xPtr, "x");
     // builder->CreateRet(xValue);
 }
@@ -1018,7 +1026,7 @@ void CgenClassTable::install_basic_classes()
 // CgenClassTable::install_classes
 //
 // install_classes enters a list of classes in the symbol table.
-//
+// TODO: install class
 void CgenClassTable::install_class(CgenNodeP nd)
 {
     Symbol name = nd->get_name();
@@ -1031,6 +1039,21 @@ void CgenClassTable::install_class(CgenNodeP nd)
     // The class name is legal, so add it to the list of classes
     // and the symbol table.
     nds = new List<CgenNode>(nd, nds);
+
+    llvm::StructType *currStructType = llvm::StructType::create(*ctx.get(), name->get_string());
+    std::vector<llvm::Type *> classFields;
+    Features fs = nd->get_features();
+    for (int i = fs->first(); fs->more(i); i = fs->next(i))
+    {
+        Feature_class *f = fs->nth(i);
+        if (f->is_method())
+            continue;
+        classFields.push_back(get_llvm_type(f->get_type()));
+        NamedValues[f->get_name()->get_string()] = i;
+    }
+
+    currStructType->setBody(classFields);
+    nd->set_struct_type(currStructType);
     addid(name, nd);
 }
 
@@ -1694,10 +1717,7 @@ llvm::Value *block_class::llvm_code(Builder &builder, Module &module)
     for (int i = body->first(); body->more(i); i = body->next(i))
     {
 
-        cout << "Before call" << endl;
         res = body->nth(i)->llvm_code(builder, module);
-        cout << "res: ";
-        res->dump();
 
         // llvm::AllocaInst *ptr = builder->CreateAlloca(res->getType(), res, "expr");
     }
@@ -1954,7 +1974,9 @@ void bool_const_class::code(ostream &s)
 int bool_const_class::cnt_max_tmps() { return 0; }
 llvm::Value *new__class::llvm_code(Builder &builder, Module &module)
 {
-    llvm::Function *classInit = module->getFunction((std::string)type_name->get_string() + "_Init");
+    llvm::Function *classInit = module->getFunction((std::string)type_name->get_string() + CLASSINIT_SUFFIX);
+    cout << "class" << endl;
+    classInit->dump();
     llvm::AllocaInst *classInstance = builder->CreateAlloca(classInit->getArg(0)->getType()->getPointerElementType(), nullptr);
     builder->CreateCall(classInit, classInstance);
     return classInstance;
@@ -2019,15 +2041,12 @@ void no_expr_class::code(ostream &s)
 int no_expr_class::cnt_max_tmps() { return 0; }
 llvm::Value *object_class::llvm_code(Builder &builder, Module &module)
 {
-    // std::pair<char *, int> ptr = lookup_var(name);
-    // cout << "name: " << name << ", first: " << ptr.first << ", 2nd: " << ptr.second << endl;
-    // cout << "type: " << endl;
-    // builder->GetInsertBlock()->getType()->dump();
-    // builder->GetInsertBlock()->dump();
-    // builder->CreateStructGEP(mainStructType, selfArg, 0, "xFieldPtr");
     llvm::Function *fn = builder->GetInsertBlock()->getParent();
-    // = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), 0, "xFieldPtr");
-    return builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), NamedValues[name->get_string()], "xFieldPtr");
+    cout << "TODO: Inside Object class" << endl;
+    // I need type of struct/class, specific variable(pointer) to that struct/class.
+    // TODO: object_class
+
+    // return builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), NamedValues[name->get_string()], "xFieldPtr");
 }
 void object_class::code(ostream &s)
 {

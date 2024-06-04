@@ -29,7 +29,7 @@ test:
 	./parser $(FILE) && \
 	./semant $(FILE) && \
 	./codegen $(FILE)
-#test: ./lexer ./hello_world.cl | ./parser ./hello_world.cl | ./semant ./hello_world.cl | ./codegen ./hello_world.cl
+#test: ./lexer ./llvm/hello_world.cl | ./parser ./llvm/hello_world.cl | ./semant ./llvm/hello_world.cl | ./codegen ./llvm/hello_world.cl
 #llc x.ll -> .s
 #clang++ -S -emit-llvm x.cpp
 #clang++ -o hello_world hello_world.ll; hello_world; echo $?

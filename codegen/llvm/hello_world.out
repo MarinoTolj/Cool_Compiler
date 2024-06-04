@@ -127,7 +127,7 @@ _class
 _class
   Main
   Object
-  "./hello_world.cl"
+  "./llvm/hello_world.cl"
   (
   #1
   _attr
@@ -138,11 +138,45 @@ _class
       3
     : Int
   #1
+  _attr
+    y
+    Int
+    #1
+    _int
+      4
+    : Int
+  #1
+  _attr
+    z
+    Int
+    #1
+    _int
+      5
+    : Int
+  #1
   _method
     main
     Int
     #1
-    _object
-      x
+    _block
+      #1
+      _int
+        3
+      : Int
+    : Int
+  )
+#1
+_class
+  Test
+  Object
+  "./llvm/hello_world.cl"
+  (
+  #1
+  _method
+    test
+    Int
+    #1
+    _int
+      4
     : Int
   )

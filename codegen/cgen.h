@@ -94,6 +94,7 @@ private:
    void code_dispatch_tables(CgenNodeP node);
    void code_prototype_objects(CgenNodeP node);
    void code_object_initializers(CgenNodeP node);
+   void llvm_code_object_initializers(CgenNodeP node);
    void code_class_methods(CgenNodeP node);
 
    // The following creates an inheritance graph from
@@ -120,6 +121,7 @@ private:
    List<CgenNode> *children; // Children of class
    Basicness basic_status;   // `Basic' if class is basic
                              // `NotBasic' otherwise
+   llvm::StructType *struct_type;
 
 public:
    int tag;
@@ -138,6 +140,9 @@ public:
 
    int get_meth_offset(Symbol meth_name);
    int get_attr_offset(Symbol attr_name);
+
+   llvm::StructType *get_struct_type() { return struct_type; }
+   void set_struct_type(llvm::StructType *type) { struct_type = type; }
 };
 
 class BoolConst
