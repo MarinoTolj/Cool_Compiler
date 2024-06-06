@@ -881,6 +881,7 @@ void CgenClassTable::code_class(CgenNode *coolClass)
     // builder->CreateRet(xValue);
 }
 
+// TODO: LLVM type
 llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
 {
     if (cool_type == Int)
@@ -898,7 +899,27 @@ llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
     }
     else
     {
-        return builder.get()->getInt16Ty();
+        std::vector<llvm::StructType *> structTypes = module->getIdentifiedStructTypes();
+        // If attribute has Class as its type, it doesnt work, bcs class is not yet defined.
+        // In install_class we need to first define all type and then fill out fields.
+        //  cout << "New CAll for: " << endl;
+        // cout << cool_type << endl;
+
+        for (auto *structType : structTypes)
+        {
+            const char *structName = structType->getName().data();
+            // cout << "---------------------" << endl;
+            // cout << (std::string)structType->getName() << endl;
+            // cout << cool_type->get_string() << endl;
+            // cout << structType->getName().compare(cool_type->get_string()) << endl;
+
+            if (structType->getName().compare(cool_type->get_string()))
+            {
+                return structType;
+            }
+        }
+
+        return builder->getInt16Ty();
     }
 }
 void CgenClassTable::install_basic_classes()
@@ -1806,7 +1827,14 @@ int plus_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *sub_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *sub_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *L = e1->llvm_code(builder, module);
+
+    llvm::Value *R = e2->llvm_code(builder, module);
+
+    return builder->CreateSub(L, R, "subtmp");
+}
 
 void sub_class::code(ostream &s)
 {
@@ -1824,7 +1852,14 @@ int sub_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *mul_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *mul_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *L = e1->llvm_code(builder, module);
+
+    llvm::Value *R = e2->llvm_code(builder, module);
+
+    return builder->CreateMul(L, R, "multmp");
+}
 void mul_class::code(ostream &s)
 {
     e1->code(s);
@@ -1841,7 +1876,14 @@ int mul_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *divide_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *divide_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *L = e1->llvm_code(builder, module);
+
+    llvm::Value *R = e2->llvm_code(builder, module);
+
+    return builder->CreateUDiv(L, R, "divtmp");
+}
 void divide_class::code(ostream &s)
 {
     e1->code(s);
@@ -1858,7 +1900,12 @@ int divide_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *neg_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *neg_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *L = e1->llvm_code(builder, module);
+
+    return builder->CreateNeg(L, "negtmp");
+}
 void neg_class::code(ostream &s)
 {
     e1->code(s);
@@ -1868,7 +1915,15 @@ void neg_class::code(ostream &s)
     emit_store_int(T11, ACC, s);
 }
 int neg_class::cnt_max_tmps() { return e1->cnt_max_tmps(); }
-llvm::Value *lt_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *lt_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *L = e1->llvm_code(builder, module);
+
+    llvm::Value *R = e2->llvm_code(builder, module);
+
+    // Integer Compare UnSigned Less Than
+    return builder->CreateICmpULT(L, R, "lttmp");
+}
 void lt_class::code(ostream &s)
 {
     // kodiram livi operand
@@ -1890,7 +1945,14 @@ int lt_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *eq_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *eq_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *L = e1->llvm_code(builder, module);
+
+    llvm::Value *R = e2->llvm_code(builder, module);
+
+    return builder->CreateICmpEQ(L, R, "eqtmp");
+}
 void eq_class::code(ostream &s)
 {
     // kodiraj livi izraz
@@ -1915,7 +1977,14 @@ int eq_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *leq_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *leq_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *L = e1->llvm_code(builder, module);
+
+    llvm::Value *R = e2->llvm_code(builder, module);
+    // Integer Compare UnSigned Less Than or Equal
+    return builder->CreateICmpULE(L, R, "leqtmp");
+}
 void leq_class::code(ostream &s)
 {
     e1->code(s);
@@ -1934,7 +2003,12 @@ int leq_class::cnt_max_tmps()
 {
     return max(e1->cnt_max_tmps(), 1 + e2->cnt_max_tmps());
 }
-llvm::Value *comp_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *comp_class::llvm_code(Builder &builder, Module &module)
+{
+    // TODO: pitat sta je comp
+
+    cout << "Inside Comp Class" << endl;
+}
 void comp_class::code(ostream &s)
 {
     e1->code(s);
@@ -1960,13 +2034,20 @@ void int_const_class::code(ostream &s)
     emit_load_int(ACC, inttable.lookup_string(token->get_string()), s);
 }
 int int_const_class::cnt_max_tmps() { return 0; }
-llvm::Value *string_const_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *string_const_class::llvm_code(Builder &builder, Module &module)
+{
+    StringEntry *string_literal = stringtable.lookup_string(token->get_string());
+    cout << "String class" << endl;
+}
 void string_const_class::code(ostream &s)
 {
     emit_load_string(ACC, stringtable.lookup_string(token->get_string()), s);
 }
 int string_const_class::cnt_max_tmps() { return 0; }
-llvm::Value *bool_const_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *bool_const_class::llvm_code(Builder &builder, Module &module)
+{
+    return builder->getInt1(val);
+}
 void bool_const_class::code(ostream &s)
 {
     emit_load_bool(ACC, BoolConst(val), s);
@@ -2015,7 +2096,11 @@ void new__class::code(ostream &s)
     }
 }
 int new__class::cnt_max_tmps() { return 1; }
-llvm::Value *isvoid_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *isvoid_class::llvm_code(Builder &builder, Module &module)
+{
+    // TODO: pitat sta radi isvoid
+    llvm::Value *expr = e1->llvm_code(builder, module);
+}
 void isvoid_class::code(ostream &s)
 {
     // najprije kodiram i pohranjujem izraz

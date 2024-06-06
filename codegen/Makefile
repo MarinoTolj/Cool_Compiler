@@ -33,7 +33,7 @@ test:
 #llc x.ll -> .s
 #clang++ -S -emit-llvm x.cpp
 #clang++ -o hello_world hello_world.ll; hello_world; echo $?
-#lli hello_world.ll; echo $?
+#lli ./llvm/hello_world.ll; echo $?
 
 codegen:
 # kompajlira pomocne datoteke bez linkanja
