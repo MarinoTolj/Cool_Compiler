@@ -716,6 +716,7 @@ void set_tags(CgenNodeP node)
         set_tags(cld->hd());
     }
 }
+std::map<std::string, int> NamedValues;
 
 // TODO: pocetak
 CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
@@ -738,6 +739,25 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     code();
     // For llvm
     ofstream test("./llvm/hello_world.out");
+    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    {
+        auto nd = cld->hd();
+        cout << nd->get_name() << endl;
+        std::vector<llvm::Type *> classFields;
+        Features fs = nd->get_features();
+
+        for (int i = fs->first(); fs->more(i); i = fs->next(i))
+        {
+            Feature_class *f = fs->nth(i);
+            if (f->is_method())
+                continue;
+            classFields.push_back(get_llvm_type(f->get_type()));
+            NamedValues[f->get_name()->get_string()] = i;
+        }
+        auto structType = nd->get_struct_type();
+        structType->setBody(classFields);
+    }
+
     llvm_code_object_initializers(root());
     for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
     {
@@ -747,15 +767,16 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     save_module_to_file("./llvm/hello_world.ll");
     exitscope();
 }
-std::map<std::string, int> NamedValues;
 
 void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
 {
+
     for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
     {
 
         CgenNode *coolClass = cld->hd();
         std::string className = coolClass->get_name()->get_string();
+
         Features fs = coolClass->get_features();
 
         llvm::StructType *currStructType = coolClass->get_struct_type();
@@ -770,6 +791,7 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
 
         CgenNode *coolClass = cld->hd();
         std::string className = coolClass->get_name()->get_string();
+
         Features fs = coolClass->get_features();
 
         llvm::StructType *currStructType = coolClass->get_struct_type();
@@ -840,6 +862,7 @@ void CgenClassTable::code_class(CgenNode *coolClass)
             // Allocate and call init function only for class main inside main method.
             llvm::AllocaInst *classInstance = builder->CreateAlloca(currStructType, nullptr);
             llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
+
             builder->CreateCall(classInit, classInstance);
         }
         else
@@ -884,44 +907,49 @@ void CgenClassTable::code_class(CgenNode *coolClass)
 // TODO: LLVM type
 llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
 {
-    if (cool_type == Int)
-    {
 
-        return builder.get()->getInt32Ty();
-    }
-    else if (cool_type == Bool)
-    {
-        return builder.get()->getInt1Ty();
-    }
-    else if (cool_type == Str)
-    {
-        return builder.get()->getInt8PtrTy();
-    }
-    else
-    {
-        std::vector<llvm::StructType *> structTypes = module->getIdentifiedStructTypes();
-        // If attribute has Class as its type, it doesnt work, bcs class is not yet defined.
-        // In install_class we need to first define all type and then fill out fields.
-        //  cout << "New CAll for: " << endl;
-        // cout << cool_type << endl;
+    // if (cool_type == Int)
+    // {
 
-        for (auto *structType : structTypes)
+    //     return builder.get()->getInt32Ty();
+    // }
+    // else if (cool_type == Bool)
+    // {
+    //     return builder.get()->getInt1Ty();
+    // }
+    // else if (cool_type == Str)
+    // {
+    //     return builder.get()->getInt8PtrTy();
+    // }
+
+    std::vector<llvm::StructType *> structTypes = module->getIdentifiedStructTypes();
+
+    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    {
+        if (cld->hd()->get_name()->equal_string(cool_type->get_string(), cool_type->get_len()))
         {
-            const char *structName = structType->getName().data();
-            // cout << "---------------------" << endl;
-            // cout << (std::string)structType->getName() << endl;
-            // cout << cool_type->get_string() << endl;
-            // cout << structType->getName().compare(cool_type->get_string()) << endl;
 
-            if (structType->getName().compare(cool_type->get_string()))
-            {
-                return structType;
-            }
+            return cld->hd()->get_struct_type();
         }
-
-        return builder->getInt16Ty();
     }
+
+    // for (auto *structType : structTypes)
+    // {
+    //     const char *structName = structType->getName().data();
+    //     cout << "---------------------" << endl;
+    //     cout << (std::string)structType->getName() << endl;
+    //     cout << cool_type->get_string() << endl;
+    //     cout << structType->getName().compare(cool_type->get_string()) << endl;
+
+    //     if (structType->getName().compare(cool_type->get_string()))
+    //     {
+    //         return structType;
+    //     }
+    // }
+
+    return builder->getInt16Ty();
 }
+
 void CgenClassTable::install_basic_classes()
 {
 
@@ -1062,18 +1090,7 @@ void CgenClassTable::install_class(CgenNodeP nd)
     nds = new List<CgenNode>(nd, nds);
 
     llvm::StructType *currStructType = llvm::StructType::create(*ctx.get(), name->get_string());
-    std::vector<llvm::Type *> classFields;
-    Features fs = nd->get_features();
-    for (int i = fs->first(); fs->more(i); i = fs->next(i))
-    {
-        Feature_class *f = fs->nth(i);
-        if (f->is_method())
-            continue;
-        classFields.push_back(get_llvm_type(f->get_type()));
-        NamedValues[f->get_name()->get_string()] = i;
-    }
 
-    currStructType->setBody(classFields);
     nd->set_struct_type(currStructType);
     addid(name, nd);
 }
