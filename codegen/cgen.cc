@@ -1821,8 +1821,19 @@ llvm::Value *plus_class::llvm_code(Builder &builder, Module &module)
     llvm::Value *L = e1->llvm_code(builder, module);
 
     llvm::Value *R = e2->llvm_code(builder, module);
+    auto L_pointer = builder->CreateStructGEP(L->getType()->getPointerElementType(), L, 0);
+    auto L_val = builder->CreateLoad(builder->getInt32Ty(), L_pointer);
 
-    return builder->CreateAdd(L, R, "addtmp");
+    auto R_pointer = builder->CreateStructGEP(L->getType()->getPointerElementType(), R, 0);
+    auto R_val = builder->CreateLoad(builder->getInt32Ty(), R_pointer);
+    llvm::Value *int_const = builder->CreateAdd(L_val, R_val, "addtmp");
+
+    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+
+    auto int_val = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0);
+    builder->CreateStore(int_const, int_val);
+    return intClassInstance;
 }
 void plus_class::code(ostream &s)
 {
@@ -2040,8 +2051,21 @@ int comp_class::cnt_max_tmps() { return e1->cnt_max_tmps(); }
 
 llvm::Value *int_const_class::llvm_code(Builder &builder, Module &module)
 {
+    // TODO: pitat jel vracam bas kao int konstantu ili kao Int klasu.
+    // Ovo je ako int konstantu:
+
+    // int real_int = atoi(inttable.lookup_string(token->get_string())->get_string());
+    // return llvm::ConstantInt::get(builder->getContext(), llvm::APInt(32, real_int));
+
+    // ovo je kao klasu Int
+    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+    builder->CreateCall(int_init, intClassInstance);
     int real_int = atoi(inttable.lookup_string(token->get_string())->get_string());
-    return llvm::ConstantInt::get(builder->getContext(), llvm::APInt(32, real_int));
+    llvm::Value *int_const = llvm::ConstantInt::get(builder->getContext(), llvm::APInt(32, real_int));
+    auto int_val = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0);
+    builder->CreateStore(int_const, int_val);
+    return intClassInstance;
 }
 void int_const_class::code(ostream &s)
 {
