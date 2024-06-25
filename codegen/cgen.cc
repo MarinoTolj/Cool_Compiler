@@ -808,6 +808,8 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
         {
 
             llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
+            index++;
+
             Expression expr = (*Iter)->get_expr();
             if (expr->is_no_expr())
                 continue;
@@ -816,8 +818,6 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
             {
                 builder->CreateStore(attribute, ptr);
             }
-
-            index++;
         }
         // Return void
         builder->CreateRet(nullptr);
