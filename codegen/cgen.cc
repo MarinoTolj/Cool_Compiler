@@ -742,18 +742,37 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
     {
         auto nd = cld->hd();
-        cout << nd->get_name() << endl;
+        // cout << nd->get_name() << endl;
         std::vector<llvm::Type *> classFields;
         Features fs = nd->get_features();
-
-        for (int i = fs->first(); fs->more(i); i = fs->next(i))
+        if (nd->get_name()->equal_string("Int", 3))
         {
-            Feature_class *f = fs->nth(i);
-            if (f->is_method())
-                continue;
-            classFields.push_back(get_llvm_type(f->get_type()));
-            NamedValues[f->get_name()->get_string()] = i;
+            classFields.push_back(builder.get()->getInt32Ty());
         }
+        else if (nd->get_name()->equal_string("Bool", 4))
+        {
+            classFields.push_back(builder.get()->getInt1Ty());
+        }
+        else if (nd->get_name()->equal_string("String", 6))
+        {
+            // attr: val
+            classFields.push_back(get_llvm_type(Int));
+            // attr: str_field
+            classFields.push_back(builder.get()->getInt8PtrTy());
+        }
+        else
+        {
+
+            for (int i = fs->first(); fs->more(i); i = fs->next(i))
+            {
+                Feature_class *f = fs->nth(i);
+                if (f->is_method())
+                    continue;
+                classFields.push_back(get_llvm_type(f->get_type()));
+                NamedValues[f->get_name()->get_string()] = i;
+            }
+        }
+
         auto structType = nd->get_struct_type();
         structType->setBody(classFields);
     }
@@ -803,6 +822,7 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
         llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
         llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", classInit);
         builder->SetInsertPoint(entry);
+        // TODO:make so that Int class init val atrr to 0.
         for (vecFeatureIter Iter = coolClass->attributes.begin();
              Iter != coolClass->attributes.end(); ++Iter)
         {
@@ -828,8 +848,6 @@ void CgenClassTable::code_class(CgenNode *coolClass)
 {
     std::string className = coolClass->get_name()->get_string();
 
-    // TODO: methods
-    //  Codegen for Methods
     llvm::StructType *currStructType = coolClass->get_struct_type();
 
     llvm::Value *res = nullptr;
