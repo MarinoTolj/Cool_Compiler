@@ -1694,7 +1694,30 @@ int cond_class::cnt_max_tmps()
     return max(pred->cnt_max_tmps(),
                max(then_exp->cnt_max_tmps(), else_exp->cnt_max_tmps()));
 }
-llvm::Value *loop_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *loop_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Function *fn = builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *condBlock = llvm::BasicBlock::Create(builder->getContext(), "condBlock", fn);
+    llvm::BasicBlock *startBlock = llvm::BasicBlock::Create(builder->getContext(), "startBlock");
+    llvm::BasicBlock *endBlock = llvm::BasicBlock::Create(builder->getContext(), "endBlock");
+
+    builder->CreateBr(condBlock);
+
+    fn->getBasicBlockList().push_back(condBlock);
+    builder->SetInsertPoint(condBlock);
+    llvm::Value *pred_val = pred->llvm_code(builder, module);
+    builder->CreateCondBr(pred_val, startBlock, endBlock);
+
+    fn->getBasicBlockList().push_back(startBlock);
+    builder->SetInsertPoint(startBlock);
+    llvm::Value *startValue = body->llvm_code(builder, module);
+    builder->CreateBr(condBlock);
+
+    fn->getBasicBlockList().push_back(endBlock);
+    builder->SetInsertPoint(endBlock);
+    // TODO: what to return after while loop? void(nullptr)?
+    // return nullptr;
+}
 void loop_class::code(ostream &s)
 {
     // napravi labele za početak i kraj
