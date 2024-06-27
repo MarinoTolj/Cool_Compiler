@@ -1634,7 +1634,42 @@ int dispatch_class::cnt_max_tmps()
         cnt = max(cnt, actual->nth(i)->cnt_max_tmps());
     return cnt;
 }
-llvm::Value *cond_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *cond_class::llvm_code(Builder &builder, Module &module)
+{
+    // auto ctx = ;
+    llvm::Function *fn = builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *thenBlock = llvm::BasicBlock::Create(builder->getContext(), "thenBlock", fn);
+    llvm::BasicBlock *elseBlock = llvm::BasicBlock::Create(builder->getContext(), "elseBlock");
+    llvm::BasicBlock *mergeBlock = llvm::BasicBlock::Create(builder->getContext(), "endBlock");
+
+    llvm::Value *pred_val = pred->llvm_code(builder, module);
+    // maybe or maybe not neccessary.
+    //  CondV = Builder->CreateFCmpONE(
+    //    CondV, ConstantFP::get(*TheContext, APFloat(0.0)), "ifcond");
+    builder->CreateCondBr(pred_val, thenBlock, elseBlock);
+
+    fn->getBasicBlockList().push_back(thenBlock);
+    builder->SetInsertPoint(thenBlock);
+    llvm::Value *thenValue = then_exp->llvm_code(builder, module);
+    builder->CreateBr(mergeBlock);
+
+    // Generate code for the false block
+    fn->getBasicBlockList().push_back(elseBlock);
+    builder->SetInsertPoint(elseBlock);
+    llvm::Value *elseValue = else_exp->llvm_code(builder, module);
+    builder->CreateBr(mergeBlock);
+
+    // Merge block
+    fn->getBasicBlockList().push_back(mergeBlock);
+    builder->SetInsertPoint(mergeBlock);
+    llvm::PHINode *phi = builder->CreatePHI(thenValue->getType(), 2, "iftmp");
+
+    phi->addIncoming(thenValue, thenBlock);
+    phi->addIncoming(elseValue, elseBlock);
+
+    // builder->CreateRet(phi);
+    return phi;
+}
 void cond_class::code(ostream &s)
 {
     // radim nove labele za els i end
