@@ -48,6 +48,7 @@ int tmp_cnt = 0;
 CgenNodeP cur_node;
 CgenClassTableP class_table;
 SymbolTable<Symbol, int> tmp_table;
+SymbolTable<Symbol, int> llvm_tmp_table;
 
 class CgenClassTable : public SymbolTable<Symbol, CgenNode>
 {
