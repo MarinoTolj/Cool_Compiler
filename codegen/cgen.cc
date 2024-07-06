@@ -1892,12 +1892,33 @@ int let_class::cnt_max_tmps()
 llvm::Value *plus_class::llvm_code(Builder &builder, Module &module)
 {
     llvm::Value *L = e1->llvm_code(builder, module);
-    auto L_pointer = builder->CreateStructGEP(L->getType()->getPointerElementType(), L, 0);
-    auto L_val = builder->CreateLoad(builder->getInt32Ty(), L_pointer);
+
+    llvm::LoadInst *L_val = nullptr;
+    // If we get literal insted of object.
+    if (L->getType() == builder->getInt32Ty())
+    {
+        L_val = (llvm::LoadInst *)L;
+    }
+    // For object
+    else
+    {
+        auto L_pointer = builder->CreateStructGEP(L->getType()->getPointerElementType(), L, 0);
+
+        L_val = builder->CreateLoad(builder->getInt32Ty(), L_pointer);
+    }
 
     llvm::Value *R = e2->llvm_code(builder, module);
-    auto R_pointer = builder->CreateStructGEP(R->getType()->getPointerElementType(), R, 0);
-    auto R_val = builder->CreateLoad(builder->getInt32Ty(), R_pointer);
+    llvm::LoadInst *R_val = nullptr;
+    if (R->getType() == builder->getInt32Ty())
+    {
+        R_val = (llvm::LoadInst *)R;
+    }
+    else
+    {
+        auto R_pointer = builder->CreateStructGEP(R->getType()->getPointerElementType(), R, 0);
+
+        R_val = builder->CreateLoad(builder->getInt32Ty(), R_pointer);
+    }
 
     llvm::Value *addtmp = builder->CreateAdd(L_val, R_val, "addtmp");
     auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);

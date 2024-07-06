@@ -49,12 +49,16 @@ entry:
   %main_struct_ptr = getelementptr inbounds %Main, %Main* %0, i32 0, i32 0
   %1 = getelementptr inbounds %Int, %Int* %main_struct_ptr, i32 0, i32 0
   %2 = load i32, i32* %1, align 4
+  %addtmp = add i32 100, %2
+  %3 = alloca %Int, align 8
+  %4 = getelementptr inbounds %Int, %Int* %3, i32 0, i32 0
+  store i32 %addtmp, i32* %4, align 4
   %main_struct_ptr1 = getelementptr inbounds %Main, %Main* %0, i32 0, i32 1
-  %3 = getelementptr inbounds %Int, %Int* %main_struct_ptr1, i32 0, i32 0
-  %4 = load i32, i32* %3, align 4
-  %addtmp = add i32 %2, %4
-  %5 = alloca %Int, align 8
-  %6 = getelementptr inbounds %Int, %Int* %5, i32 0, i32 0
-  store i32 %addtmp, i32* %6, align 4
-  ret i32 %addtmp
+  %5 = getelementptr inbounds %Int, %Int* %main_struct_ptr1, i32 0, i32 0
+  %6 = load i32, i32* %5, align 4
+  %addtmp2 = add i32 %addtmp, %6
+  %7 = alloca %Int, align 8
+  %8 = getelementptr inbounds %Int, %Int* %7, i32 0, i32 0
+  store i32 %addtmp2, i32* %8, align 4
+  ret i32 %addtmp2
 }
