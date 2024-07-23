@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <vector>
+#include <map>
 #include <algorithm>
 #include "emit.h"
 #include "cool-tree.h"
@@ -97,6 +98,7 @@ private:
    void code_object_initializers(CgenNodeP node);
    void llvm_code_object_initializers(CgenNodeP node);
    void code_class_methods(CgenNodeP node);
+   void llvm_code_class_methods(CgenNodeP node);
 
    // The following creates an inheritance graph from
    // a list of classes.  The graph is implemented as
@@ -123,6 +125,7 @@ private:
    Basicness basic_status;   // `Basic' if class is basic
                              // `NotBasic' otherwise
    llvm::StructType *struct_type;
+   std::map<Symbol, int> foo;
 
 public:
    int tag;
@@ -141,8 +144,13 @@ public:
 
    int get_meth_offset(Symbol meth_name);
    int get_attr_offset(Symbol attr_name);
+   int get_llvm_attr_offset(Symbol attr_name) { return this->foo[attr_name]; }
+   void set_llvm_atrr_offset(Symbol attr_name, int offset) { this->foo[attr_name] = offset; }
 
-   llvm::StructType *get_struct_type() { return struct_type; }
+   llvm::StructType *get_struct_type()
+   {
+      return struct_type;
+   }
    void set_struct_type(llvm::StructType *type) { struct_type = type; }
 };
 

@@ -29,11 +29,13 @@ test:
 	./parser $(FILE) && \
 	./semant $(FILE) && \
 	./codegen $(FILE)
-#test: ./lexer ./llvm/hello_world.cl | ./parser ./llvm/hello_world.cl | ./semant ./llvm/hello_world.cl | ./codegen ./llvm/hello_world.cl
-#llc x.ll -> .s
-#clang++ -S -emit-llvm x.cpp
+#./lexer ./llvm/hello_world.cl | ./parser ./llvm/hello_world.cl | ./semant ./llvm/hello_world.cl | ./codegen ./llvm/hello_world.cl
+#clang++ -S -emit-llvm ./llvm/x.cpp -o ./llvm/x.ll
 #clang++ -o hello_world hello_world.ll; hello_world; echo $?
 #lli ./llvm/hello_world.ll; echo $?
+#llc ./llvm/hello_world.ll -o ./llvm/llvm_hello_world.s
+#g++ ./llvm/llvm_hello_world.s -o ./llvm/hello_world;./llvm/hello_world;echo $?
+
 
 codegen:
 # kompajlira pomocne datoteke bez linkanja
