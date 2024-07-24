@@ -129,14 +129,14 @@ std::pair<char *, int> lookup_var(Symbol name)
 }
 
 // lookup name in locals and current class's attrs.
-std::pair<bool, int> llvm_lookup_var(Symbol name)
+std::tuple<bool, llvm::Value *, int> llvm_lookup_var(Symbol name)
 {
-    int *loc = llvm_tmp_table.lookup(name);
-    cout << "IN llvm_lookup_var, the name: " << name << ". Offset: " << loc << endl;
+    llvm::Value **loc = llvm_tmp_table.lookup(name);
+
     if (loc == NULL)
-        return std::make_pair(true, cur_node->get_llvm_attr_offset(name));
+        return std::make_tuple(true, nullptr, cur_node->get_llvm_attr_offset(name));
     else
-        return std::make_pair(false, *loc);
+        return std::make_tuple(false, *loc, 0);
 }
 
 //*********************************************************
@@ -755,7 +755,6 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
     {
         auto nd = cld->hd();
-        // cout << nd->get_name() << endl;
         std::vector<llvm::Type *> classFields;
         Features fs = nd->get_features();
         if (nd->get_name()->equal_string("Int", 3))
@@ -962,14 +961,22 @@ void CgenClassTable::code_class(CgenNode *coolClass)
         builder->SetInsertPoint(entry);
         llvm_tmp_table.enterscope();
         Formals fms = f_method->get_formals();
-        int index = 0;
-        for (int i = fms->first(); fms->more(i); i = fms->next(i))
-        {
-            formal_class *formal_param = (formal_class *)fms->nth(i);
-            int *pint = new int;
-            *pint = index++;
+        auto it = currFunction->arg_begin(); // Get the iterator to the first argument
+        auto end = currFunction->arg_end();  // Get the iterator to the end of the arguments
 
-            llvm_tmp_table.addid(formal_param->get_name(), pint);
+        if (it != end)
+        {
+            ++it; // Skip the first argument since it pointer to struct.
+        }
+
+        int index = 0;
+        for (; it != end; ++it)
+        {
+            formal_class *formal_param = (formal_class *)fms->nth(index);
+            auto foo = (llvm::Value *)currFunction->getArg(index + 1);
+            auto bar = new llvm::Value *(foo);
+            llvm_tmp_table.addid(formal_param->get_name(), bar);
+            index++;
         }
         res = f_method->get_expr()->llvm_code(builder, module);
         cout << "Res:" << endl;
@@ -1583,7 +1590,7 @@ llvm::Value *assign_class::llvm_code(Builder &builder, Module &module)
 
     auto arg_size = fn->arg_size();
     // If arg_size is 0 it means were are in main function/method.
-    if (arg_size == 0)
+    if (arg_size == 0 && std::get<0>(offset))
     {
         for (llvm::BasicBlock &BB : *fn)
         {
@@ -1592,22 +1599,22 @@ llvm::Value *assign_class::llvm_code(Builder &builder, Module &module)
                 if (auto *allocaInst = llvm::dyn_cast<llvm::AllocaInst>(&I))
                 {
 
-                    auto id = builder->CreateStructGEP(allocaInst->getType()->getPointerElementType(), allocaInst, offset.second, "main_struct_ptr");
+                    auto id = builder->CreateStructGEP(allocaInst->getType()->getPointerElementType(), allocaInst, std::get<2>(offset), "main_struct_ptr");
                     return builder->CreateStore(rhs_expr, id);
                 }
             }
         }
     }
-    if (offset.first)
+    if (std::get<0>(offset))
     {
-        auto id = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), offset.second, "FieldPtr");
+        auto id = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), std::get<2>(offset), "FieldPtr");
 
         // auto id = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), 0, "xFieldPtr");
         return builder->CreateStore(rhs_expr, id);
     }
-    auto id = fn->getArg(offset.second + 1);
-    builder->CreateStore(rhs_expr, id);
-    return id;
+
+    auto bar = new llvm::Value *(rhs_expr);
+    llvm_tmp_table.addid(name, bar);
 }
 void assign_class::code(ostream &s)
 {
@@ -1973,7 +1980,34 @@ int block_class::cnt_max_tmps()
         cnt = max(cnt, body->nth(i)->cnt_max_tmps());
     return cnt;
 }
-llvm::Value *let_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *let_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *init_expr;
+    if (init->is_no_expr())
+    {
+        // TODO: let init values
+        //  // default value
+        //  if (type_decl == Int)
+        //      emit_load_int(ACC, inttable.lookup_string("0"), s);
+        //  else if (type_decl == Bool)
+        //      emit_load_bool(ACC, falsebool, s);
+        //  else if (type_decl == Str)
+        //      emit_load_string(ACC, stringtable.lookup_string(""), s);
+        //  else
+        //      emit_move(ACC, ZERO, s); // void
+    }
+    else
+        init_expr = init->llvm_code(builder, module);
+
+    llvm_tmp_table.enterscope();
+    auto bar = new llvm::Value *(init_expr);
+    llvm_tmp_table.addid(identifier, bar);
+
+    llvm::Value *result_of_body = body->llvm_code(builder, module);
+
+    llvm_tmp_table.exitscope();
+    return result_of_body;
+}
 void let_class::code(ostream &s)
 {
     // ako nema inicijalizacije varijablu postavljam na default vrijednost
@@ -2395,7 +2429,7 @@ llvm::Value *object_class::llvm_code(Builder &builder, Module &module)
     llvm::Function *fn = builder->GetInsertBlock()->getParent();
     auto arg_size = fn->arg_size();
     // If arg_size is 0 it means were are in main function/method.
-    if (arg_size == 0)
+    if (arg_size == 0 && std::get<0>(offset))
     {
         for (llvm::BasicBlock &BB : *fn)
         {
@@ -2404,16 +2438,16 @@ llvm::Value *object_class::llvm_code(Builder &builder, Module &module)
                 if (auto *allocaInst = llvm::dyn_cast<llvm::AllocaInst>(&I))
                 {
 
-                    return builder->CreateStructGEP(allocaInst->getType()->getPointerElementType(), allocaInst, offset.second, "main_struct_ptr");
+                    return builder->CreateStructGEP(allocaInst->getType()->getPointerElementType(), allocaInst, std::get<2>(offset), "main_struct_ptr");
                 }
             }
         }
     }
-    if (offset.first)
+    if (std::get<0>(offset))
     {
-        return builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), offset.second, "FieldPtr");
+        return builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), std::get<2>(offset), "FieldPtr");
     }
-    return fn->getArg(offset.second + 1);
+    return std::get<1>(offset);
 }
 void object_class::code(ostream &s)
 {

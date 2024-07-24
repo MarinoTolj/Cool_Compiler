@@ -49,7 +49,7 @@ int tmp_cnt = 0;
 CgenNodeP cur_node;
 CgenClassTableP class_table;
 SymbolTable<Symbol, int> tmp_table;
-SymbolTable<Symbol, int> llvm_tmp_table;
+SymbolTable<Symbol, llvm::Value *> llvm_tmp_table;
 
 class CgenClassTable : public SymbolTable<Symbol, CgenNode>
 {
@@ -125,7 +125,7 @@ private:
    Basicness basic_status;   // `Basic' if class is basic
                              // `NotBasic' otherwise
    llvm::StructType *struct_type;
-   std::map<Symbol, int> foo;
+   std::map<Symbol, int> attr_offset;
 
 public:
    int tag;
@@ -144,8 +144,8 @@ public:
 
    int get_meth_offset(Symbol meth_name);
    int get_attr_offset(Symbol attr_name);
-   int get_llvm_attr_offset(Symbol attr_name) { return this->foo[attr_name]; }
-   void set_llvm_atrr_offset(Symbol attr_name, int offset) { this->foo[attr_name] = offset; }
+   int get_llvm_attr_offset(Symbol attr_name) { return this->attr_offset[attr_name]; }
+   void set_llvm_atrr_offset(Symbol attr_name, int offset) { this->attr_offset[attr_name] = offset; }
 
    llvm::StructType *get_struct_type()
    {
