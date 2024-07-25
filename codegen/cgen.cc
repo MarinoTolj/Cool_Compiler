@@ -751,140 +751,141 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
 
     code();
     // For llvm
-    ofstream test("./llvm/hello_world.out");
-    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
-    {
-        auto nd = cld->hd();
-        std::vector<llvm::Type *> classFields;
-        Features fs = nd->get_features();
-        if (nd->get_name()->equal_string("Int", 3))
-        {
-            classFields.push_back(builder.get()->getInt32Ty());
-        }
-        else if (nd->get_name()->equal_string("Bool", 4))
-        {
-            classFields.push_back(builder.get()->getInt1Ty());
-        }
-        else if (nd->get_name()->equal_string("String", 6))
-        {
-            // attr: val
-            classFields.push_back(get_llvm_type(Int));
-            // attr: str_field
-            classFields.push_back(builder.get()->getInt8PtrTy());
-        }
-        else
-        {
-
-            for (int i = fs->first(); fs->more(i); i = fs->next(i))
-            {
-                Feature_class *f = fs->nth(i);
-                if (f->is_method())
-                    continue;
-                nd->set_llvm_atrr_offset(f->get_name(), i);
-                classFields.push_back(get_llvm_type(f->get_type()));
-                NamedValues[f->get_name()->get_string()] = i;
-            }
-        }
-
-        auto structType = nd->get_struct_type();
-        structType->setBody(classFields);
-    }
-
+    ofstream out("./llvm/hello_world.out");
+    llvm_code_class_to_structs(root());
+    llvm_code_prototype_objects(root());
     llvm_code_object_initializers(root());
     llvm_code_class_methods(root());
-    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
-    {
-        cld->hd()->dump_with_types(test, 0);
-        code_class(cld->hd());
-    }
+    llvm_code_class(root(), &out);
+
     save_module_to_file("./llvm/hello_world.ll");
     exitscope();
     llvm_tmp_table.exitscope();
 }
 
-void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
+void CgenClassTable::llvm_code_class_to_structs(CgenNodeP node)
 {
 
-    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    std::vector<llvm::Type *> classFields;
+    Features fs = node->get_features();
+    if (node->get_name()->equal_string("Int", 3))
     {
-
-        CgenNode *coolClass = cld->hd();
-        std::string className = coolClass->get_name()->get_string();
-
-        Features fs = coolClass->get_features();
-
-        llvm::StructType *currStructType = coolClass->get_struct_type();
-
-        // Create function which will initialize class.
-        llvm::FunctionType *classInitType = llvm::FunctionType::get(builder->getVoidTy(), currStructType->getPointerTo(), false);
-
-        llvm::Function *classInit = llvm::Function::Create(classInitType, llvm::Function::ExternalLinkage, className + CLASSINIT_SUFFIX, module.get());
+        classFields.push_back(builder.get()->getInt32Ty());
     }
-    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    else if (node->get_name()->equal_string("Bool", 4))
     {
-        llvm_tmp_table.enterscope();
+        classFields.push_back(builder.get()->getInt1Ty());
+    }
+    else if (node->get_name()->equal_string("String", 6))
+    {
+        // attr: val
+        classFields.push_back(get_llvm_type(Int));
+        // attr: str_field
+        classFields.push_back(builder.get()->getInt8PtrTy());
+    }
+    else
+    {
 
-        CgenNode *coolClass = cld->hd();
-        std::string className = coolClass->get_name()->get_string();
-
-        Features fs = coolClass->get_features();
-
-        llvm::StructType *currStructType = coolClass->get_struct_type();
-
-        llvm::AllocaInst *classInstance = nullptr;
-        llvm::ArrayRef<llvm::Type *> structFields = currStructType->elements();
-
-        int index = 0;
-        llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
-        llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", classInit);
-        builder->SetInsertPoint(entry);
-
-        if (className == "Int")
+        for (int i = fs->first(); fs->more(i); i = fs->next(i))
         {
+            Feature_class *f = fs->nth(i);
+            if (f->is_method())
+                continue;
+            node->set_llvm_atrr_offset(f->get_name(), i);
+            classFields.push_back(get_llvm_type(f->get_type()));
+            NamedValues[f->get_name()->get_string()] = i;
+        }
+    }
+
+    auto structType = node->get_struct_type();
+    structType->setBody(classFields);
+
+    for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+        llvm_code_class_to_structs(cld->hd());
+}
+void CgenClassTable::llvm_code_prototype_objects(CgenNodeP node)
+{
+
+    std::string className = node->get_name()->get_string();
+
+    Features fs = node->get_features();
+
+    llvm::StructType *currStructType = node->get_struct_type();
+
+    // Create function which will initialize class.
+    llvm::FunctionType *classInitType = llvm::FunctionType::get(builder->getVoidTy(), currStructType->getPointerTo(), false);
+
+    llvm::Function *classInit = llvm::Function::Create(classInitType, llvm::Function::ExternalLinkage, className + CLASSINIT_SUFFIX, module.get());
+
+    for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+        llvm_code_prototype_objects(cld->hd());
+}
+void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
+{
+
+    llvm_tmp_table.enterscope();
+
+    std::string className = node->get_name()->get_string();
+
+    Features fs = node->get_features();
+
+    llvm::StructType *currStructType = node->get_struct_type();
+
+    llvm::AllocaInst *classInstance = nullptr;
+    llvm::ArrayRef<llvm::Type *> structFields = currStructType->elements();
+
+    int index = 0;
+    llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
+    llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", classInit);
+    builder->SetInsertPoint(entry);
+
+    if (className == "Int")
+    {
+        llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
+        builder->CreateStore(builder->getInt32(0), ptr);
+    }
+    else if (className == "Main" || className == "Test")
+    {
+        for (vecFeatureIter Iter = node->attributes.begin();
+             Iter != node->attributes.end(); ++Iter)
+        {
+            llvm_tmp_table.enterscope();
             llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
-            builder->CreateStore(builder->getInt32(0), ptr);
-        }
-        else if (className == "Main" || className == "Test")
-        {
-            for (vecFeatureIter Iter = coolClass->attributes.begin();
-                 Iter != coolClass->attributes.end(); ++Iter)
+
+            index++;
+
+            Expression expr = (*Iter)->get_expr();
+            // Maybe if only if there is no_expr for attr, then to call init func for that class.
+            if (expr->is_no_expr())
             {
-                llvm_tmp_table.enterscope();
-                llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
 
-                index++;
-
-                Expression expr = (*Iter)->get_expr();
-                // Maybe if only if there is no_expr for attr, then to call init func for that class.
-                if (expr->is_no_expr())
-                {
-
-                    builder->CreateCall(module->getFunction((std::string)(*Iter)->get_type()->get_string() + CLASSINIT_SUFFIX), ptr);
-                    continue;
-                }
-                llvm::Value *attribute = expr->llvm_code(builder, module);
-
-                if (attribute)
-                {
-
-                    if (attribute->getType()->isPointerTy())
-                    {
-
-                        auto load = builder->CreateLoad(attribute->getType()->getPointerElementType(), attribute);
-                        builder->CreateStore(load, ptr);
-                    }
-                    else
-                    {
-
-                        builder->CreateStore(attribute, ptr);
-                    }
-                }
-                llvm_tmp_table.exitscope();
+                builder->CreateCall(module->getFunction((std::string)(*Iter)->get_type()->get_string() + CLASSINIT_SUFFIX), ptr);
+                continue;
             }
+            llvm::Value *attribute = expr->llvm_code(builder, module);
+
+            if (attribute)
+            {
+
+                if (attribute->getType()->isPointerTy())
+                {
+
+                    auto load = builder->CreateLoad(attribute->getType()->getPointerElementType(), attribute);
+                    builder->CreateStore(load, ptr);
+                }
+                else
+                {
+
+                    builder->CreateStore(attribute, ptr);
+                }
+            }
+            llvm_tmp_table.exitscope();
         }
-        // Return void
-        builder->CreateRet(nullptr);
     }
+    // Return void
+    builder->CreateRet(nullptr);
+    for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+        llvm_code_object_initializers(cld->hd());
 }
 void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
 {
@@ -936,17 +937,21 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
         llvm_code_class_methods(cld->hd());
 }
 // TODO: llvm code
-void CgenClassTable::code_class(CgenNode *coolClass)
+void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
 {
-    std::string className = coolClass->get_name()->get_string();
+    std::string className = node->get_name()->get_string();
+    cout << "Classname: " << className << endl;
 
-    llvm::StructType *currStructType = coolClass->get_struct_type();
+    llvm::StructType *currStructType = node->get_struct_type();
 
     llvm::Value *res = nullptr;
-    Features fs = coolClass->get_features();
+    Features fs = node->get_features();
     // TODO: delete this for Basic classes to work.
     if (!(className == "Main" || className == "Test"))
     {
+        node->dump_with_types(*out, 0);
+        for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+            llvm_code_class(cld->hd(), out);
         return;
     }
     for (int i = fs->first(); fs->more(i); i = fs->next(i))
@@ -955,7 +960,7 @@ void CgenClassTable::code_class(CgenNode *coolClass)
         if (!f->is_method())
             continue;
         method_class *f_method = dynamic_cast<method_class *>(f);
-        cur_node = coolClass;
+        cur_node = node;
         llvm::Function *currFunction = module->getFunction(f_method->get_name()->get_string());
         llvm::BasicBlock *entry = &currFunction->getEntryBlock();
         builder->SetInsertPoint(entry);
@@ -994,6 +999,9 @@ void CgenClassTable::code_class(CgenNode *coolClass)
         llvm::verifyFunction(*currFunction);
         llvm_tmp_table.exitscope();
     }
+    node->dump_with_types(*out, 0);
+    for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+        llvm_code_class(cld->hd(), out);
 }
 
 // TODO: LLVM type

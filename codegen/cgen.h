@@ -77,7 +77,7 @@ private:
       module->print(outLL, nullptr);
    }
 
-   void code_class(CgenNode *cool_class);
+   void llvm_code_class(CgenNodeP node, std::ofstream *out);
    llvm::Type *get_llvm_type(Symbol cool_type);
 
    // The following methods emit code for
@@ -95,10 +95,12 @@ private:
    void code_fill_features(CgenNodeP node);
    void code_dispatch_tables(CgenNodeP node);
    void code_prototype_objects(CgenNodeP node);
+   void llvm_code_prototype_objects(CgenNodeP node);
    void code_object_initializers(CgenNodeP node);
    void llvm_code_object_initializers(CgenNodeP node);
    void code_class_methods(CgenNodeP node);
    void llvm_code_class_methods(CgenNodeP node);
+   void llvm_code_class_to_structs(CgenNodeP node);
 
    // The following creates an inheritance graph from
    // a list of classes.  The graph is implemented as
