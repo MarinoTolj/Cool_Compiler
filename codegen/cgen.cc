@@ -852,9 +852,6 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
                 llvm_tmp_table.enterscope();
                 llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
 
-                // int *pint = new int;
-                // *pint = index;
-                // llvm_tmp_table.addid((*Iter)->get_name(), pint);
                 index++;
 
                 Expression expr = (*Iter)->get_expr();
@@ -869,9 +866,12 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP root)
 
                 if (attribute)
                 {
-                    if (attribute->getType() == builder->getInt32Ty())
+
+                    if (attribute->getType()->isPointerTy())
                     {
-                        builder->CreateStore(attribute, builder->CreateStructGEP(ptr->getType()->getPointerElementType(), ptr, 0));
+
+                        auto load = builder->CreateLoad(attribute->getType()->getPointerElementType(), attribute);
+                        builder->CreateStore(load, ptr);
                     }
                     else
                     {
@@ -984,7 +984,10 @@ void CgenClassTable::code_class(CgenNode *coolClass)
 
         if (res != nullptr)
         {
-
+            if (res->getType()->isPointerTy())
+            {
+                res = builder->CreateLoad(res->getType()->getPointerElementType(), res);
+            }
             builder->CreateRet(res);
             res = nullptr;
         }
@@ -1674,9 +1677,9 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
     tp = tp == SELF_TYPE ? cur_node->get_name() : tp;
     auto callee = module->getFunction(name->get_string());
     std::vector<llvm::Value *> args;
+    llvm::Function *fn = builder->GetInsertBlock()->getParent();
     if (expr->get_type() == SELF_TYPE)
     {
-        llvm::Function *fn = builder->GetInsertBlock()->getParent();
         auto arg_size = fn->arg_size();
         // If arg_size is 0 it means were are in main function/method.
         if (arg_size == 0)
@@ -1698,6 +1701,11 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
 
             args.push_back(fn->getArg(0));
         }
+    }
+    else
+    {
+        llvm::Value *expr_value = expr->llvm_code(builder, module);
+        args.push_back(expr_value);
     }
     for (int i = actual->first(); actual->more(i); i = actual->next(i))
     {
@@ -1868,7 +1876,15 @@ int loop_class::cnt_max_tmps()
 {
     return max(pred->cnt_max_tmps(), body->cnt_max_tmps());
 }
-llvm::Value *typcase_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *typcase_class::llvm_code(Builder &builder, Module &module)
+{
+    llvm::Value *expr0 = expr->llvm_code(builder, module);
+
+    if (expr0 == NULL)
+    {
+        // TODO  : handle void case
+    }
+}
 void typcase_class::code(ostream &s)
 {
     int end = new_label();
@@ -2398,6 +2414,14 @@ int new__class::cnt_max_tmps() { return 1; }
 llvm::Value *isvoid_class::llvm_code(Builder &builder, Module &module)
 {
     llvm::Value *expr = e1->llvm_code(builder, module);
+    if (expr == NULL)
+    {
+        return builder->getInt1(true);
+    }
+    else
+    {
+        return builder->getInt1(false);
+    }
 }
 void isvoid_class::code(ostream &s)
 {
