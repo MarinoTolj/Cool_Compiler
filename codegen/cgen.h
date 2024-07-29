@@ -148,6 +148,35 @@ public:
    int get_attr_offset(Symbol attr_name);
    int get_llvm_attr_offset(Symbol attr_name) { return this->attr_offset[attr_name]; }
    void set_llvm_atrr_offset(Symbol attr_name, int offset) { this->attr_offset[attr_name] = offset; }
+   std::pair<std::string, CgenNodeP> get_meth_name(Symbol meth_name)
+   {
+      std::string new_method_name;
+      Symbol class_name;
+      for (vecNameNameIter Iter = this->methods.begin();
+           Iter != this->methods.end(); ++Iter)
+      {
+         if ((*Iter).first == meth_name)
+         {
+
+            new_method_name = (*Iter).second->get_string() + (std::string) "." + meth_name->get_string();
+            class_name = (*Iter).second;
+            break;
+         }
+      }
+
+      return std::make_pair(new_method_name, get_parent_class(class_name));
+   }
+   CgenNodeP get_parent_class(Symbol class_name)
+   {
+      if (class_name == this->parentnd->get_name())
+      {
+         return this->parentnd;
+      }
+      else
+      {
+         return this->parentnd->get_parent_class(class_name);
+      }
+   }
 
    llvm::StructType *get_struct_type()
    {

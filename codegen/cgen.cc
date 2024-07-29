@@ -727,7 +727,6 @@ void set_tags(CgenNodeP node)
         set_tags(cld->hd());
     }
 }
-std::map<std::string, int> NamedValues;
 
 // TODO: pocetak
 CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
@@ -756,6 +755,7 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     llvm_code_prototype_objects(root());
     llvm_code_object_initializers(root());
     llvm_code_class_methods(root());
+
     llvm_code_class(root(), &out);
 
     save_module_to_file("./llvm/hello_world.ll");
@@ -767,7 +767,6 @@ void CgenClassTable::llvm_code_class_to_structs(CgenNodeP node)
 {
 
     std::vector<llvm::Type *> classFields;
-    Features fs = node->get_features();
     if (node->get_name()->equal_string("Int", 3))
     {
         classFields.push_back(builder.get()->getInt32Ty());
@@ -785,15 +784,14 @@ void CgenClassTable::llvm_code_class_to_structs(CgenNodeP node)
     }
     else
     {
-
-        for (int i = fs->first(); fs->more(i); i = fs->next(i))
+        int index = 0;
+        for (vecFeatureIter Iter = node->attributes.begin();
+             Iter != node->attributes.end(); ++Iter)
         {
-            Feature_class *f = fs->nth(i);
-            if (f->is_method())
-                continue;
-            node->set_llvm_atrr_offset(f->get_name(), i);
-            classFields.push_back(get_llvm_type(f->get_type()));
-            NamedValues[f->get_name()->get_string()] = i;
+
+            node->set_llvm_atrr_offset((*Iter)->get_name(), index);
+            classFields.push_back(get_llvm_type((*Iter)->get_type()));
+            index++;
         }
     }
 
@@ -844,7 +842,7 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
         llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
         builder->CreateStore(builder->getInt32(0), ptr);
     }
-    else if (className == "Main" || className == "Test")
+    else if (className == "Main" || className == "Test" || className == "Test1")
     {
         for (vecFeatureIter Iter = node->attributes.begin();
              Iter != node->attributes.end(); ++Iter)
@@ -895,18 +893,44 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
     if (node->basic() == false)
     {
         Features fs = node->get_features();
-        for (int i = fs->first(); fs->more(i); i = fs->next(i))
+
+        for (vecNameNameIter Iter = node->methods.begin();
+             Iter != node->methods.end(); ++Iter)
         {
-            Feature_class *f = fs->nth(i);
-            if (!f->is_method())
+            if (!((*Iter).second->equal_string("Main", 4) || (*Iter).second->equal_string("Test", 4) || (*Iter).second->equal_string("Test1", 5)))
+            {
                 continue;
+            }
+            Feature_class *f = nullptr;
+            for (int i = fs->first(); fs->more(i); i = fs->next(i))
+            {
+                Feature_class *foo = fs->nth(i);
+
+                if (foo->is_method() && foo->get_name()->equal_string((*Iter).first->get_string(), (*Iter).first->get_len()))
+                {
+                    f = foo;
+                    break;
+                }
+            }
+            // If we didn't found method, it means that it was inherited but not overriden. So we just continue because method is already defined.
+            if (f == nullptr)
+            {
+                continue;
+            }
+
             method_class *f_method = dynamic_cast<method_class *>(f);
             std::vector<llvm::Type *>
                 llvm_args;
+            std::string method_name = (*Iter).second->get_string() + (std::string) "." + (*Iter).first->get_string();
             if (!(className == "Main" && f_method->get_name()->equal_string("main", 4)))
             {
                 // Set first arg to class itself.
                 llvm_args.push_back(currStructType->getPointerTo());
+            }
+            else
+            {
+                // LLVM requires function named main to be entry point. So in this case we are reseting method_name to main.
+                method_name = "main";
             }
             Formals fms = f_method->get_formals();
             for (int i = fms->first(); fms->more(i); i = fms->next(i))
@@ -914,10 +938,12 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
                 formal_class *formal_param = (formal_class *)fms->nth(i);
                 llvm_args.push_back(get_llvm_type(formal_param->get_type_decl()));
             }
+
             llvm::FunctionType *currFunctionType = llvm::FunctionType::get(get_llvm_type(f_method->return_type), llvm_args, false);
-            llvm::Function *currFunction = llvm::Function::Create(currFunctionType, llvm::Function::ExternalLinkage, f_method->get_name()->get_string(), module.get());
+            llvm::Function *currFunction = llvm::Function::Create(currFunctionType, llvm::Function::ExternalLinkage, method_name, module.get());
             llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", currFunction);
             builder->SetInsertPoint(entry);
+
             if (className == "Main" && f_method->get_name()->equal_string("main", 4))
             {
                 // Allocate and call init function only for class main inside main method.
@@ -947,21 +973,47 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
     llvm::Value *res = nullptr;
     Features fs = node->get_features();
     // TODO: delete this for Basic classes to work.
-    if (!(className == "Main" || className == "Test"))
+    if (!(className == "Main" || className == "Test" || className == "Test1"))
     {
         node->dump_with_types(*out, 0);
         for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
             llvm_code_class(cld->hd(), out);
         return;
     }
-    for (int i = fs->first(); fs->more(i); i = fs->next(i))
+    for (vecNameNameIter Iter = node->methods.begin();
+         Iter != node->methods.end(); ++Iter)
     {
-        Feature_class *f = fs->nth(i);
-        if (!f->is_method())
+
+        if (!((*Iter).second->equal_string("Main", 4) || (*Iter).second->equal_string("Test", 4) || (*Iter).second->equal_string("Test1", 5)))
+        {
+
             continue;
+        }
+        Feature_class *f = nullptr;
+        for (int i = fs->first(); fs->more(i); i = fs->next(i))
+        {
+            Feature_class *foo = fs->nth(i);
+
+            if (foo->is_method() && foo->get_name()->equal_string((*Iter).first->get_string(), (*Iter).first->get_len()))
+            {
+                f = foo;
+                break;
+            }
+        }
+        // If we didn't found method, it means that it was inherited but not overriden. So we just continue because method is already defined.
+        if (f == nullptr)
+        {
+            continue;
+        }
         method_class *f_method = dynamic_cast<method_class *>(f);
         cur_node = node;
-        llvm::Function *currFunction = module->getFunction(f_method->get_name()->get_string());
+        std::string method_name = (*Iter).second->get_string() + (std::string) "." + (*Iter).first->get_string();
+        if (className == "Main" && f_method->get_name()->equal_string("main", 4))
+        {
+            // LLVM requires function named main to be entry point. So in this case we are reseting method_name to main.
+            method_name = "main";
+        }
+        llvm::Function *currFunction = module->getFunction(method_name);
         llvm::BasicBlock *entry = &currFunction->getEntryBlock();
         builder->SetInsertPoint(entry);
         llvm_tmp_table.enterscope();
@@ -1010,7 +1062,8 @@ llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
 
     std::vector<llvm::StructType *> structTypes = module->getIdentifiedStructTypes();
 
-    for (List<CgenNode> *cld = this->root()->get_children(); cld != NULL; cld = cld->tl())
+    for (List<CgenNode> *cld = nds; cld != NULL; cld = cld->tl())
+
     {
         if (cld->hd()->get_name()->equal_string(cool_type->get_string(), cool_type->get_len()))
         {
@@ -1018,20 +1071,6 @@ llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
             return cld->hd()->get_struct_type();
         }
     }
-
-    // for (auto *structType : structTypes)
-    // {
-    //     const char *structName = structType->getName().data();
-    //     cout << "---------------------" << endl;
-    //     cout << (std::string)structType->getName() << endl;
-    //     cout << cool_type->get_string() << endl;
-    //     cout << structType->getName().compare(cool_type->get_string()) << endl;
-
-    //     if (structType->getName().compare(cool_type->get_string()))
-    //     {
-    //         return structType;
-    //     }
-    // }
 
     return builder->getInt16Ty();
 }
@@ -1683,9 +1722,15 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
     // actual->dump(cout, 1);
     Symbol tp = expr->get_type();
     tp = tp == SELF_TYPE ? cur_node->get_name() : tp;
-    auto callee = module->getFunction(name->get_string());
+
+    std::string method_name = tp->get_string() + (std::string) "." + name->get_string();
+
+    auto callee = module->getFunction(method_name);
+
     std::vector<llvm::Value *> args;
+    llvm::Value *first_arg;
     llvm::Function *fn = builder->GetInsertBlock()->getParent();
+
     if (expr->get_type() == SELF_TYPE)
     {
         auto arg_size = fn->arg_size();
@@ -1699,7 +1744,9 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
                     if (auto *allocaInst = llvm::dyn_cast<llvm::AllocaInst>(&I))
                     {
 
-                        args.push_back(allocaInst);
+                        // args.push_back(allocaInst);
+                        first_arg = allocaInst;
+                        break;
                     }
                 }
             }
@@ -1707,14 +1754,25 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
         else
         {
 
-            args.push_back(fn->getArg(0));
+            // args.push_back(fn->getArg(0));
+            first_arg = fn->getArg(0);
         }
     }
     else
     {
         llvm::Value *expr_value = expr->llvm_code(builder, module);
-        args.push_back(expr_value);
+        // args.push_back(expr_value);
+        first_arg = expr_value;
     }
+
+    // If we dont find method it means it it inherited but not overriden. In that case get new name and do bitcast.
+    if (callee == NULL)
+    {
+        std::pair<std::string, CgenNodeP> method_name = cur_node->get_meth_name(name);
+        callee = module->getFunction(method_name.first);
+        first_arg = builder->CreateBitCast(first_arg, method_name.second->get_struct_type()->getPointerTo());
+    }
+    args.push_back(first_arg);
     for (int i = actual->first(); actual->more(i); i = actual->next(i))
     {
         auto value = actual->nth(i)->llvm_code(builder, module);
@@ -2379,8 +2437,7 @@ int bool_const_class::cnt_max_tmps() { return 0; }
 llvm::Value *new__class::llvm_code(Builder &builder, Module &module)
 {
     llvm::Function *classInit = module->getFunction((std::string)type_name->get_string() + CLASSINIT_SUFFIX);
-    cout << "class" << endl;
-    classInit->dump();
+
     llvm::AllocaInst *classInstance = builder->CreateAlloca(classInit->getArg(0)->getType()->getPointerElementType(), nullptr);
     builder->CreateCall(classInit, classInstance);
     return classInstance;
