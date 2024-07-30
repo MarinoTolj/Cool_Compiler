@@ -1001,41 +1001,59 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
     }
     else if (className == "String")
     {
-        llvm::Function *currFunction = module->getFunction("String.length");
-        llvm::BasicBlock *entry = &currFunction->getEntryBlock();
-        builder->SetInsertPoint(entry);
+        llvm::Function *string_length_fn = module->getFunction("String.length");
+        llvm::BasicBlock *length_entry = &string_length_fn->getEntryBlock();
+        builder->SetInsertPoint(length_entry);
 
-        llvm::Value *string_self = currFunction->getArg(0);
-        llvm::Value *length_field = builder->CreateStructGEP(string_self->getType()->getPointerElementType(), string_self, 0);
+        llvm::Value *string_self_length = string_length_fn->getArg(0);
+        llvm::Value *length_field = builder->CreateStructGEP(string_self_length->getType()->getPointerElementType(), string_self_length, 0);
         builder->CreateRet(builder->CreateLoad(length_field->getType()->getPointerElementType(), length_field));
 
-        llvm::verifyFunction(*currFunction);
-        // TODO: concat and substring
-        //  llvm::Function *currFunction = module->getFunction("String.concat");
-        //  llvm::BasicBlock *entry = &currFunction->getEntryBlock();
-        //  builder->SetInsertPoint(entry);
+        llvm::verifyFunction(*string_length_fn);
+        // TODO: substring
+        llvm::Function *string_concat_fn = module->getFunction("String.concat");
+        llvm::BasicBlock *concat_entry = &string_concat_fn->getEntryBlock();
+        builder->SetInsertPoint(concat_entry);
 
-        // llvm::Value *string_self = currFunction->getArg(0);
-        // llvm::Value *str_field = builder->CreateStructGEP(string_self->getType()->getPointerElementType(), string_self, 1);
-        // llvm::Value *s = currFunction->getArg(1);
+        llvm::Value *string_self_concat = string_concat_fn->getArg(0);
+        llvm::Value *str_field_self = builder->CreateStructGEP(string_self_concat->getType()->getPointerElementType(), string_self_concat, 1);
+        llvm::Value *s = string_concat_fn->getArg(1);
 
-        // auto str_init = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
-        // llvm::AllocaInst *strClassInstance = builder->CreateAlloca(str_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+        auto init_string = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
+        llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType(), nullptr);
 
-        // llvm::Value *length_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 0);
-        // auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
-        // llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
-        // llvm::Value *int_val_field = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0);
-        // builder->CreateStore(builder->getInt32(string_literal->get_len()), int_val_field);
+        llvm::Value *new_string_length_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 0);
+        auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+        llvm::AllocaInst *new_length = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+        llvm::Value *new_length_field = builder->CreateStructGEP(new_length->getType()->getPointerElementType(), new_length, 0);
+        llvm::Value *self_string_length = builder->CreateLoad(builder->getInt32Ty(), builder->CreateStructGEP(new_length->getType()->getPointerElementType(), builder->CreateStructGEP(string_self_concat->getType()->getPointerElementType(), string_self_concat, 0), 0));
+        llvm::Value *s_string_length = builder->CreateExtractValue(builder->CreateExtractValue(s, 0), 0);
+        llvm::Value *new_length_value = builder->CreateAdd(
+            self_string_length, s_string_length);
+        builder->CreateStore(new_length_value, new_length_field);
 
-        // auto load_int = builder->CreateLoad(intClassInstance->getType()->getPointerElementType(), intClassInstance);
-        // builder->CreateStore(load_int, length_field);
+        auto load_int = builder->CreateLoad(new_length->getType()->getPointerElementType(), new_length);
+        builder->CreateStore(load_int, new_string_length_field);
 
-        // llvm::Value *str_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 1);
-        // llvm::Value *str_val = builder->CreateGlobalStringPtr(string_literal->get_string());
-        // builder->CreateStore(str_val, str_field);
+        llvm::Function *malloc = llvm::Function::Create(llvm::FunctionType::get(builder->getInt8PtrTy(), builder->getInt32Ty(), false),
+                                                        llvm::Function::ExternalLinkage, "malloc", module.get());
+        llvm::Value *malloc_call = builder->CreateCall(malloc, new_length_value);
 
-        // llvm::verifyFunction(*currFunction);
+        llvm::Function *MemcpyFunc = llvm::Function::Create(llvm::FunctionType::get(builder->getInt8PtrTy(),
+                                                                                    {builder->getInt8PtrTy(), builder->getInt8PtrTy(), builder->getInt32Ty()}, false),
+                                                            llvm::Function::ExternalLinkage, "memcpy", module.get());
+        builder->CreateCall(MemcpyFunc, {malloc_call, builder->CreateLoad(str_field_self->getType()->getPointerElementType(), str_field_self), self_string_length});
+
+        llvm::Value *EndOfFirstStr = builder->CreateGEP(malloc_call->getType()->getPointerElementType(), malloc_call, self_string_length, "endOfFirstStr");
+
+        // Copy the second string to the new allocated space, starting after the first string
+        builder->CreateCall(MemcpyFunc, {EndOfFirstStr, builder->CreateExtractValue(s, 1), s_string_length});
+
+        llvm::Value *str_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 1);
+        builder->CreateStore(malloc_call, str_field);
+
+        builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
+        llvm::verifyFunction(*string_concat_fn);
     }
     else
     {
@@ -1836,6 +1854,7 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
         callee = module->getFunction(method_name.first);
         first_arg = builder->CreateBitCast(first_arg, method_name.second->get_struct_type()->getPointerTo());
     }
+    // TODO: handle case for chaining methods. ...concat(...).length()
     args.push_back(first_arg);
     for (int i = actual->first(); actual->more(i); i = actual->next(i))
     {
