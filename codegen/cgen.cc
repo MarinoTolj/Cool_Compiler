@@ -839,10 +839,29 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
 
     if (className == "Int")
     {
-        llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index);
+        llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), 0);
         builder->CreateStore(builder->getInt32(0), ptr);
     }
-    else if (className == "Main" || className == "Test" || className == "Test1")
+    else if (className == "Bool")
+    {
+        llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), 0);
+        builder->CreateStore(builder->getInt1(0), ptr);
+    }
+    else if (className == "String")
+    {
+        llvm::Value *length_field = builder->CreateStructGEP(currStructType, classInit->getArg(0), 0);
+        auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+        llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+
+        builder->CreateCall(int_init, intClassInstance);
+        auto load_int = builder->CreateLoad(intClassInstance->getType()->getPointerElementType(), intClassInstance);
+        builder->CreateStore(load_int, length_field);
+
+        llvm::Value *str_field = builder->CreateStructGEP(currStructType, classInit->getArg(0), 1);
+        llvm::Value *emptyStr = builder->CreateGlobalStringPtr("", "emptyStr");
+        builder->CreateStore(emptyStr, str_field);
+    }
+    else
     {
         for (vecFeatureIter Iter = node->attributes.begin();
              Iter != node->attributes.end(); ++Iter)
@@ -890,17 +909,16 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
     std::string className = node->get_name()->get_string();
 
     llvm::StructType *currStructType = node->get_struct_type();
-    if (node->basic() == false)
+
+    Features fs = node->get_features();
+    // TODO: dont forget Object and IO methods
+    if (!(className == "Object" || className == "IO"))
     {
-        Features fs = node->get_features();
 
         for (vecNameNameIter Iter = node->methods.begin();
              Iter != node->methods.end(); ++Iter)
         {
-            if (!((*Iter).second->equal_string("Main", 4) || (*Iter).second->equal_string("Test", 4) || (*Iter).second->equal_string("Test1", 5)))
-            {
-                continue;
-            }
+
             Feature_class *f = nullptr;
             for (int i = fs->first(); fs->more(i); i = fs->next(i))
             {
@@ -959,6 +977,7 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
             }
         }
     }
+
     for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
         llvm_code_class_methods(cld->hd());
 }
@@ -973,84 +992,129 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
     llvm::Value *res = nullptr;
     Features fs = node->get_features();
     // TODO: delete this for Basic classes to work.
-    if (!(className == "Main" || className == "Test" || className == "Test1"))
+    if (className == "Object" || className == "IO")
     {
-        node->dump_with_types(*out, 0);
-        for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
-            llvm_code_class(cld->hd(), out);
-        return;
+        // node->dump_with_types(*out, 0);
+        // for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+        //     llvm_code_class(cld->hd(), out);
+        // return;
     }
-    for (vecNameNameIter Iter = node->methods.begin();
-         Iter != node->methods.end(); ++Iter)
+    else if (className == "String")
     {
-
-        if (!((*Iter).second->equal_string("Main", 4) || (*Iter).second->equal_string("Test", 4) || (*Iter).second->equal_string("Test1", 5)))
-        {
-
-            continue;
-        }
-        Feature_class *f = nullptr;
-        for (int i = fs->first(); fs->more(i); i = fs->next(i))
-        {
-            Feature_class *foo = fs->nth(i);
-
-            if (foo->is_method() && foo->get_name()->equal_string((*Iter).first->get_string(), (*Iter).first->get_len()))
-            {
-                f = foo;
-                break;
-            }
-        }
-        // If we didn't found method, it means that it was inherited but not overriden. So we just continue because method is already defined.
-        if (f == nullptr)
-        {
-            continue;
-        }
-        method_class *f_method = dynamic_cast<method_class *>(f);
-        cur_node = node;
-        std::string method_name = (*Iter).second->get_string() + (std::string) "." + (*Iter).first->get_string();
-        if (className == "Main" && f_method->get_name()->equal_string("main", 4))
-        {
-            // LLVM requires function named main to be entry point. So in this case we are reseting method_name to main.
-            method_name = "main";
-        }
-        llvm::Function *currFunction = module->getFunction(method_name);
+        llvm::Function *currFunction = module->getFunction("String.length");
         llvm::BasicBlock *entry = &currFunction->getEntryBlock();
         builder->SetInsertPoint(entry);
-        llvm_tmp_table.enterscope();
-        Formals fms = f_method->get_formals();
-        auto it = currFunction->arg_begin(); // Get the iterator to the first argument
-        auto end = currFunction->arg_end();  // Get the iterator to the end of the arguments
 
-        if (it != end)
-        {
-            ++it; // Skip the first argument since it pointer to struct.
-        }
+        llvm::Value *string_self = currFunction->getArg(0);
+        llvm::Value *length_field = builder->CreateStructGEP(string_self->getType()->getPointerElementType(), string_self, 0);
+        builder->CreateRet(builder->CreateLoad(length_field->getType()->getPointerElementType(), length_field));
 
-        int index = 0;
-        for (; it != end; ++it)
-        {
-            formal_class *formal_param = (formal_class *)fms->nth(index);
-            auto foo = (llvm::Value *)currFunction->getArg(index + 1);
-            auto bar = new llvm::Value *(foo);
-            llvm_tmp_table.addid(formal_param->get_name(), bar);
-            index++;
-        }
-        res = f_method->get_expr()->llvm_code(builder, module);
-        cout << "Res:" << endl;
-        res->dump();
-
-        if (res != nullptr)
-        {
-            if (res->getType()->isPointerTy())
-            {
-                res = builder->CreateLoad(res->getType()->getPointerElementType(), res);
-            }
-            builder->CreateRet(res);
-            res = nullptr;
-        }
         llvm::verifyFunction(*currFunction);
-        llvm_tmp_table.exitscope();
+        // TODO: concat and substring
+        //  llvm::Function *currFunction = module->getFunction("String.concat");
+        //  llvm::BasicBlock *entry = &currFunction->getEntryBlock();
+        //  builder->SetInsertPoint(entry);
+
+        // llvm::Value *string_self = currFunction->getArg(0);
+        // llvm::Value *str_field = builder->CreateStructGEP(string_self->getType()->getPointerElementType(), string_self, 1);
+        // llvm::Value *s = currFunction->getArg(1);
+
+        // auto str_init = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
+        // llvm::AllocaInst *strClassInstance = builder->CreateAlloca(str_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+
+        // llvm::Value *length_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 0);
+        // auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+        // llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+        // llvm::Value *int_val_field = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0);
+        // builder->CreateStore(builder->getInt32(string_literal->get_len()), int_val_field);
+
+        // auto load_int = builder->CreateLoad(intClassInstance->getType()->getPointerElementType(), intClassInstance);
+        // builder->CreateStore(load_int, length_field);
+
+        // llvm::Value *str_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 1);
+        // llvm::Value *str_val = builder->CreateGlobalStringPtr(string_literal->get_string());
+        // builder->CreateStore(str_val, str_field);
+
+        // llvm::verifyFunction(*currFunction);
     }
+    else
+    {
+        for (vecNameNameIter Iter = node->methods.begin();
+             Iter != node->methods.end(); ++Iter)
+        {
+
+            // if (!((*Iter).second->equal_string("Main", 4) || (*Iter).second->equal_string("Test", 4) || (*Iter).second->equal_string("Test1", 5)))
+            // {
+            //     continue;
+            // }
+            Feature_class *f = nullptr;
+            for (int i = fs->first(); fs->more(i); i = fs->next(i))
+            {
+                Feature_class *foo = fs->nth(i);
+
+                if (foo->is_method() && foo->get_name()->equal_string((*Iter).first->get_string(), (*Iter).first->get_len()))
+                {
+                    f = foo;
+                    break;
+                }
+            }
+            // If we didn't found method, it means that it was inherited but not overriden. So we just continue because method is already defined.
+            if (f == nullptr)
+            {
+                continue;
+            }
+            method_class *f_method = dynamic_cast<method_class *>(f);
+            cur_node = node;
+            std::string method_name = (*Iter).second->get_string() + (std::string) "." + (*Iter).first->get_string();
+            if (className == "Main" && f_method->get_name()->equal_string("main", 4))
+            {
+                // LLVM requires function named main to be entry point. So in this case we are reseting method_name to main.
+                method_name = "main";
+            }
+            llvm::Function *currFunction = module->getFunction(method_name);
+            llvm::BasicBlock *entry = &currFunction->getEntryBlock();
+            builder->SetInsertPoint(entry);
+            llvm_tmp_table.enterscope();
+            Formals fms = f_method->get_formals();
+            auto it = currFunction->arg_begin(); // Get the iterator to the first argument
+            auto end = currFunction->arg_end();  // Get the iterator to the end of the arguments
+
+            if (it != end)
+            {
+                ++it; // Skip the first argument since it pointer to struct.
+            }
+
+            int index = 0;
+            for (; it != end; ++it)
+            {
+                formal_class *formal_param = (formal_class *)fms->nth(index);
+                auto foo = (llvm::Value *)currFunction->getArg(index + 1);
+                auto bar = new llvm::Value *(foo);
+                llvm_tmp_table.addid(formal_param->get_name(), bar);
+                index++;
+            }
+            res = f_method->get_expr()->llvm_code(builder, module);
+
+            if (res != nullptr)
+            {
+                cout << "Res:" << endl;
+                res->dump();
+                if (res->getType()->isPointerTy())
+                {
+                    res = builder->CreateLoad(res->getType()->getPointerElementType(), res);
+                }
+                builder->CreateRet(res);
+                res = nullptr;
+            }
+            else
+            {
+                builder->CreateRet(nullptr);
+            }
+            llvm::verifyFunction(*currFunction);
+            llvm_tmp_table.exitscope();
+        }
+    }
+
     node->dump_with_types(*out, 0);
     for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
         llvm_code_class(cld->hd(), out);
@@ -2418,7 +2482,22 @@ int int_const_class::cnt_max_tmps() { return 0; }
 llvm::Value *string_const_class::llvm_code(Builder &builder, Module &module)
 {
     StringEntry *string_literal = stringtable.lookup_string(token->get_string());
-    cout << "String class" << endl;
+    auto str_init = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *strClassInstance = builder->CreateAlloca(str_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+
+    llvm::Value *length_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 0);
+    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+    llvm::Value *int_val_field = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0);
+    builder->CreateStore(builder->getInt32(string_literal->get_len()), int_val_field);
+
+    auto load_int = builder->CreateLoad(intClassInstance->getType()->getPointerElementType(), intClassInstance);
+    builder->CreateStore(load_int, length_field);
+
+    llvm::Value *str_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 1);
+    llvm::Value *str_val = builder->CreateGlobalStringPtr(string_literal->get_string());
+    builder->CreateStore(str_val, str_field);
+    return builder->CreateLoad(strClassInstance->getType()->getPointerElementType(), strClassInstance);
 }
 void string_const_class::code(ostream &s)
 {
@@ -2427,7 +2506,12 @@ void string_const_class::code(ostream &s)
 int string_const_class::cnt_max_tmps() { return 0; }
 llvm::Value *bool_const_class::llvm_code(Builder &builder, Module &module)
 {
-    return builder->getInt1(val);
+    auto bool_init = module->getFunction((std::string) "Bool" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *boolClassInstance = builder->CreateAlloca(bool_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+
+    auto bool_val = builder->CreateStructGEP(boolClassInstance->getType()->getPointerElementType(), boolClassInstance, 0);
+    builder->CreateStore(builder->getInt1(val), bool_val);
+    return builder->CreateLoad(boolClassInstance->getType()->getPointerElementType(), boolClassInstance);
 }
 void bool_const_class::code(ostream &s)
 {
