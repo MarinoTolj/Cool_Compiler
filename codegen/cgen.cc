@@ -751,10 +751,23 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     code();
     // For llvm
     ofstream out("./llvm/hello_world.out");
+    code_extern_fn();
+
     llvm_code_class_to_structs(root());
     llvm_code_prototype_objects(root());
     llvm_code_object_initializers(root());
     llvm_code_class_methods(root());
+
+    // IO methods
+    io_out_string();
+    io_out_int();
+    io_in_string();
+    io_in_int();
+    // String methods
+    code_length();
+    code_concat();
+    // TODO: fix edge case with substr.
+    code_substring();
 
     llvm_code_class(root(), &out);
 
@@ -762,23 +775,46 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     exitscope();
     llvm_tmp_table.exitscope();
 }
+void CgenClassTable::code_extern_fn()
 
+{
+    // malloc
+    llvm::Function::Create(llvm::FunctionType::get(builder->getInt8PtrTy(), builder->getInt32Ty(), false),
+                           llvm::Function::ExternalLinkage, "malloc", module.get());
+    // memcpy
+    llvm::Function::Create(llvm::FunctionType::get(builder->getInt8PtrTy(),
+                                                   {builder->getInt8PtrTy(), builder->getInt8PtrTy(), builder->getInt32Ty()}, false),
+                           llvm::Function::ExternalLinkage, "memcpy", module.get());
+    // printf
+    llvm::Function::Create(llvm::FunctionType::get(builder->getInt32Ty(),
+                                                   {builder->getInt8PtrTy()}, true),
+                           llvm::Function::ExternalLinkage, "printf", module.get());
+    // scanf
+    llvm::Function::Create(llvm::FunctionType::get(builder->getInt32Ty(),
+                                                   {builder->getInt8PtrTy()}, true),
+                           llvm::Function::ExternalLinkage, "scanf", module.get());
+    // strlen
+    llvm::Function::Create(llvm::FunctionType::get(builder->getInt32Ty(),
+                                                   {builder->getInt8PtrTy()}, false),
+                           llvm::Function::ExternalLinkage, "strlen", module.get());
+}
 void CgenClassTable::llvm_code_class_to_structs(CgenNodeP node)
 {
 
     std::vector<llvm::Type *> classFields;
-    if (node->get_name()->equal_string("Int", 3))
+    Symbol className = node->get_name();
+    if (className->equal_string("Int", 3))
     {
         classFields.push_back(builder.get()->getInt32Ty());
     }
-    else if (node->get_name()->equal_string("Bool", 4))
+    else if (className->equal_string("Bool", 4))
     {
         classFields.push_back(builder.get()->getInt1Ty());
     }
-    else if (node->get_name()->equal_string("String", 6))
+    else if (className->equal_string("String", 6))
     {
         // attr: val
-        classFields.push_back(get_llvm_type(Int));
+        classFields.push_back(get_llvm_type(Int, Int));
         // attr: str_field
         classFields.push_back(builder.get()->getInt8PtrTy());
     }
@@ -790,7 +826,7 @@ void CgenClassTable::llvm_code_class_to_structs(CgenNodeP node)
         {
 
             node->set_llvm_atrr_offset((*Iter)->get_name(), index);
-            classFields.push_back(get_llvm_type((*Iter)->get_type()));
+            classFields.push_back(get_llvm_type((*Iter)->get_type(), className));
             index++;
         }
     }
@@ -912,7 +948,7 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
 
     Features fs = node->get_features();
     // TODO: dont forget Object and IO methods
-    if (!(className == "Object" || className == "IO"))
+    if (!(className == "Object"))
     {
 
         for (vecNameNameIter Iter = node->methods.begin();
@@ -954,10 +990,10 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
             for (int i = fms->first(); fms->more(i); i = fms->next(i))
             {
                 formal_class *formal_param = (formal_class *)fms->nth(i);
-                llvm_args.push_back(get_llvm_type(formal_param->get_type_decl()));
+                llvm_args.push_back(get_llvm_type(formal_param->get_type_decl(), node->get_name()));
             }
 
-            llvm::FunctionType *currFunctionType = llvm::FunctionType::get(get_llvm_type(f_method->return_type), llvm_args, false);
+            llvm::FunctionType *currFunctionType = llvm::FunctionType::get(get_llvm_type(f_method->return_type, node->get_name()), llvm_args, false);
             llvm::Function *currFunction = llvm::Function::Create(currFunctionType, llvm::Function::ExternalLinkage, method_name, module.get());
             llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", currFunction);
             builder->SetInsertPoint(entry);
@@ -981,6 +1017,190 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
     for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
         llvm_code_class_methods(cld->hd());
 }
+void CgenClassTable::io_out_string()
+{
+    llvm::Function *out_string_fn = module->getFunction("IO.out_string");
+    llvm::BasicBlock *entry = &out_string_fn->getEntryBlock();
+    builder->SetInsertPoint(entry);
+
+    llvm::Value *self = out_string_fn->getArg(0);
+    llvm::Value *string_to_print = out_string_fn->getArg(1);
+
+    llvm::Function *printf = module->getFunction("printf");
+    llvm::Value *printf_call = builder->CreateCall(printf, builder->CreateExtractValue(string_to_print, 1));
+
+    builder->CreateRet(self);
+    llvm::verifyFunction(*out_string_fn);
+}
+void CgenClassTable::io_out_int()
+{
+    llvm::Function *out_int_fn = module->getFunction("IO.out_int");
+    llvm::BasicBlock *entry = &out_int_fn->getEntryBlock();
+    builder->SetInsertPoint(entry);
+
+    llvm::Value *self = out_int_fn->getArg(0);
+    llvm::Value *int_to_print = out_int_fn->getArg(1);
+
+    llvm::Function *printf = module->getFunction("printf");
+    llvm::Value *format_int = builder->CreateGlobalStringPtr("%d", "format_int");
+    llvm::Value *printf_call = builder->CreateCall(printf, {format_int, builder->CreateExtractValue(int_to_print, 0)});
+
+    builder->CreateRet(self);
+    llvm::verifyFunction(*out_int_fn);
+}
+
+void CgenClassTable::io_in_string()
+{
+    llvm::Function *in_string_fn = module->getFunction("IO.in_string");
+    llvm::BasicBlock *entry = &in_string_fn->getEntryBlock();
+    builder->SetInsertPoint(entry);
+
+    llvm::Value *self = in_string_fn->getArg(0);
+
+    llvm::Function *scanf = module->getFunction("scanf");
+    llvm::Function *malloc = module->getFunction("malloc");
+    llvm::Function *strlen = module->getFunction("strlen");
+
+    auto init_string = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType());
+    llvm::Value *bufferSize = builder->getInt32(1024);
+    llvm::Value *buffer = builder->CreateAlloca(builder->getInt8Ty(), bufferSize, "buffer");
+
+    llvm::Value *new_string_length_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 0);
+    llvm::Value *new_string_str_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 1);
+    builder->CreateStore(buffer, new_string_str_field);
+
+    llvm::Value *format_string = builder->CreateGlobalStringPtr("%s", "format_string");
+
+    llvm::Value *scanf_call = builder->CreateCall(scanf, {format_string, builder->CreateLoad(new_string_str_field->getType()->getPointerElementType(), new_string_str_field)});
+
+    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_length = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+    llvm::Value *new_length_field = builder->CreateStructGEP(new_length->getType()->getPointerElementType(), new_length, 0);
+    llvm::Value *strlen_call = builder->CreateCall(strlen, {builder->CreateLoad(new_string_str_field->getType()->getPointerElementType(), new_string_str_field)});
+    builder->CreateStore(strlen_call, new_length_field);
+    builder->CreateStore(builder->CreateLoad(new_length->getType()->getPointerElementType(), new_length), new_string_length_field);
+
+    builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
+    llvm::verifyFunction(*in_string_fn);
+}
+void CgenClassTable::io_in_int()
+{
+    llvm::Function *in_int_fn = module->getFunction("IO.in_int");
+    llvm::BasicBlock *entry = &in_int_fn->getEntryBlock();
+    builder->SetInsertPoint(entry);
+
+    llvm::Value *self = in_int_fn->getArg(0);
+
+    llvm::Function *scanf = module->getFunction("scanf");
+
+    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_int = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+    llvm::Value *new_int_i32_field = builder->CreateStructGEP(new_int->getType()->getPointerElementType(), new_int, 0);
+    // TODO: figure out how to use pointer cast.
+    llvm::Value *format_int = builder->CreatePointerCast(module->getNamedGlobal("format_int"), builder->getInt8PtrTy());
+
+    llvm::Value *scanf_call = builder->CreateCall(scanf, {format_int, new_int_i32_field});
+
+    builder->CreateRet(builder->CreateLoad(new_int->getType()->getPointerElementType(), new_int));
+    llvm::verifyFunction(*in_int_fn);
+}
+void CgenClassTable::code_length()
+{
+    llvm::Function *string_length_fn = module->getFunction("String.length");
+    llvm::BasicBlock *length_entry = &string_length_fn->getEntryBlock();
+    builder->SetInsertPoint(length_entry);
+
+    llvm::Value *string_self_length = string_length_fn->getArg(0);
+    llvm::Value *length_field = builder->CreateStructGEP(string_self_length->getType()->getPointerElementType(), string_self_length, 0);
+    builder->CreateRet(builder->CreateLoad(length_field->getType()->getPointerElementType(), length_field));
+
+    llvm::verifyFunction(*string_length_fn);
+}
+
+void CgenClassTable::code_concat()
+{
+    llvm::Function *string_concat_fn = module->getFunction("String.concat");
+    llvm::BasicBlock *concat_entry = &string_concat_fn->getEntryBlock();
+    builder->SetInsertPoint(concat_entry);
+
+    llvm::Value *string_self_concat = string_concat_fn->getArg(0);
+    llvm::Value *str_field_self = builder->CreateStructGEP(string_self_concat->getType()->getPointerElementType(), string_self_concat, 1);
+    llvm::Value *s = string_concat_fn->getArg(1);
+
+    auto init_string = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType(), nullptr);
+
+    llvm::Value *new_string_length_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 0);
+    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_length = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+    llvm::Value *new_length_field = builder->CreateStructGEP(new_length->getType()->getPointerElementType(), new_length, 0);
+    llvm::Value *self_string_length = builder->CreateLoad(builder->getInt32Ty(), builder->CreateStructGEP(new_length->getType()->getPointerElementType(), builder->CreateStructGEP(string_self_concat->getType()->getPointerElementType(), string_self_concat, 0), 0));
+    llvm::Value *s_string_length = builder->CreateExtractValue(builder->CreateExtractValue(s, 0), 0);
+    llvm::Value *new_length_value = builder->CreateAdd(
+        self_string_length, s_string_length);
+    builder->CreateStore(new_length_value, new_length_field);
+
+    auto load_int = builder->CreateLoad(new_length->getType()->getPointerElementType(), new_length);
+    builder->CreateStore(load_int, new_string_length_field);
+
+    llvm::Function *malloc = module->getFunction("malloc");
+    llvm::Value *malloc_call = builder->CreateCall(malloc, new_length_value);
+
+    llvm::Function *MemcpyFunc = module->getFunction("memcpy");
+    builder->CreateCall(MemcpyFunc, {malloc_call, builder->CreateLoad(str_field_self->getType()->getPointerElementType(), str_field_self), self_string_length});
+
+    llvm::Value *EndOfFirstStr = builder->CreateGEP(malloc_call->getType()->getPointerElementType(), malloc_call, self_string_length, "endOfFirstStr");
+
+    // Copy the second string to the new allocated space, starting after the first string
+    builder->CreateCall(MemcpyFunc, {EndOfFirstStr, builder->CreateExtractValue(s, 1), s_string_length});
+
+    llvm::Value *str_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 1);
+    builder->CreateStore(malloc_call, str_field);
+
+    builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
+    llvm::verifyFunction(*string_concat_fn);
+}
+void CgenClassTable::code_substring()
+{
+    llvm::Function *string_substring_fn = module->getFunction("String.substr");
+    llvm::BasicBlock *entry = &string_substring_fn->getEntryBlock();
+    builder->SetInsertPoint(entry);
+
+    llvm::Value *string_self = string_substring_fn->getArg(0);
+    llvm::Value *str_field_self = builder->CreateStructGEP(string_self->getType()->getPointerElementType(), string_self, 1);
+    llvm::Value *index = string_substring_fn->getArg(1);
+    llvm::Value *length = string_substring_fn->getArg(2);
+
+    auto init_string = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType(), nullptr);
+
+    llvm::Value *new_string_length_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 0);
+    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_length_int = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+    llvm::Value *new_length_field = builder->CreateStructGEP(new_length_int->getType()->getPointerElementType(), new_length_int, 0);
+    llvm::Value *new_length_value = builder->CreateExtractValue(length, 0);
+
+    builder->CreateStore(new_length_value, new_length_field);
+
+    auto load_int = builder->CreateLoad(new_length_int->getType()->getPointerElementType(), new_length_int);
+    builder->CreateStore(load_int, new_string_length_field);
+
+    llvm::Function *malloc = module->getFunction("malloc");
+    llvm::Value *malloc_call = builder->CreateCall(malloc, new_length_value);
+
+    llvm::Function *MemcpyFunc = module->getFunction("memcpy");
+    llvm::Value *load_str_field_self = builder->CreateLoad(str_field_self->getType()->getPointerElementType(), str_field_self);
+    llvm::Value *string_at_index = builder->CreateGEP(load_str_field_self->getType()->getPointerElementType(), load_str_field_self, builder->CreateExtractValue(index, 0), "string_at_index");
+
+    builder->CreateCall(MemcpyFunc, {malloc_call, string_at_index, new_length_value});
+
+    llvm::Value *str_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 1);
+    builder->CreateStore(malloc_call, str_field);
+
+    builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
+    llvm::verifyFunction(*string_substring_fn);
+}
 // TODO: llvm code
 void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
 {
@@ -991,80 +1211,13 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
 
     llvm::Value *res = nullptr;
     Features fs = node->get_features();
-    // TODO: delete this for Basic classes to work.
-    if (className == "Object" || className == "IO")
-    {
-        // node->dump_with_types(*out, 0);
-        // for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
-        //     llvm_code_class(cld->hd(), out);
-        // return;
-    }
-    else if (className == "String")
-    {
-        llvm::Function *string_length_fn = module->getFunction("String.length");
-        llvm::BasicBlock *length_entry = &string_length_fn->getEntryBlock();
-        builder->SetInsertPoint(length_entry);
 
-        llvm::Value *string_self_length = string_length_fn->getArg(0);
-        llvm::Value *length_field = builder->CreateStructGEP(string_self_length->getType()->getPointerElementType(), string_self_length, 0);
-        builder->CreateRet(builder->CreateLoad(length_field->getType()->getPointerElementType(), length_field));
-
-        llvm::verifyFunction(*string_length_fn);
-        // TODO: substring
-        llvm::Function *string_concat_fn = module->getFunction("String.concat");
-        llvm::BasicBlock *concat_entry = &string_concat_fn->getEntryBlock();
-        builder->SetInsertPoint(concat_entry);
-
-        llvm::Value *string_self_concat = string_concat_fn->getArg(0);
-        llvm::Value *str_field_self = builder->CreateStructGEP(string_self_concat->getType()->getPointerElementType(), string_self_concat, 1);
-        llvm::Value *s = string_concat_fn->getArg(1);
-
-        auto init_string = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
-        llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType(), nullptr);
-
-        llvm::Value *new_string_length_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 0);
-        auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
-        llvm::AllocaInst *new_length = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
-        llvm::Value *new_length_field = builder->CreateStructGEP(new_length->getType()->getPointerElementType(), new_length, 0);
-        llvm::Value *self_string_length = builder->CreateLoad(builder->getInt32Ty(), builder->CreateStructGEP(new_length->getType()->getPointerElementType(), builder->CreateStructGEP(string_self_concat->getType()->getPointerElementType(), string_self_concat, 0), 0));
-        llvm::Value *s_string_length = builder->CreateExtractValue(builder->CreateExtractValue(s, 0), 0);
-        llvm::Value *new_length_value = builder->CreateAdd(
-            self_string_length, s_string_length);
-        builder->CreateStore(new_length_value, new_length_field);
-
-        auto load_int = builder->CreateLoad(new_length->getType()->getPointerElementType(), new_length);
-        builder->CreateStore(load_int, new_string_length_field);
-
-        llvm::Function *malloc = llvm::Function::Create(llvm::FunctionType::get(builder->getInt8PtrTy(), builder->getInt32Ty(), false),
-                                                        llvm::Function::ExternalLinkage, "malloc", module.get());
-        llvm::Value *malloc_call = builder->CreateCall(malloc, new_length_value);
-
-        llvm::Function *MemcpyFunc = llvm::Function::Create(llvm::FunctionType::get(builder->getInt8PtrTy(),
-                                                                                    {builder->getInt8PtrTy(), builder->getInt8PtrTy(), builder->getInt32Ty()}, false),
-                                                            llvm::Function::ExternalLinkage, "memcpy", module.get());
-        builder->CreateCall(MemcpyFunc, {malloc_call, builder->CreateLoad(str_field_self->getType()->getPointerElementType(), str_field_self), self_string_length});
-
-        llvm::Value *EndOfFirstStr = builder->CreateGEP(malloc_call->getType()->getPointerElementType(), malloc_call, self_string_length, "endOfFirstStr");
-
-        // Copy the second string to the new allocated space, starting after the first string
-        builder->CreateCall(MemcpyFunc, {EndOfFirstStr, builder->CreateExtractValue(s, 1), s_string_length});
-
-        llvm::Value *str_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 1);
-        builder->CreateStore(malloc_call, str_field);
-
-        builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
-        llvm::verifyFunction(*string_concat_fn);
-    }
-    else
+    if (node->basic() == false)
     {
         for (vecNameNameIter Iter = node->methods.begin();
              Iter != node->methods.end(); ++Iter)
         {
 
-            // if (!((*Iter).second->equal_string("Main", 4) || (*Iter).second->equal_string("Test", 4) || (*Iter).second->equal_string("Test1", 5)))
-            // {
-            //     continue;
-            // }
             Feature_class *f = nullptr;
             for (int i = fs->first(); fs->more(i); i = fs->next(i))
             {
@@ -1117,7 +1270,8 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
             {
                 cout << "Res:" << endl;
                 res->dump();
-                if (res->getType()->isPointerTy())
+
+                if (f_method->get_type() != SELF_TYPE && res->getType()->isPointerTy())
                 {
                     res = builder->CreateLoad(res->getType()->getPointerElementType(), res);
                 }
@@ -1139,20 +1293,28 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
 }
 
 // TODO: LLVM type
-llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type)
+llvm::Type *CgenClassTable::get_llvm_type(Symbol cool_type, Symbol className)
 {
 
     std::vector<llvm::StructType *> structTypes = module->getIdentifiedStructTypes();
+    bool is_self_type = false;
+    if (cool_type == SELF_TYPE)
+    {
+        cool_type = className;
+        is_self_type = true;
+    }
 
     for (List<CgenNode> *cld = nds; cld != NULL; cld = cld->tl())
 
     {
         if (cld->hd()->get_name()->equal_string(cool_type->get_string(), cool_type->get_len()))
         {
-
+            if (is_self_type)
+                return cld->hd()->get_struct_type()->getPointerTo();
             return cld->hd()->get_struct_type();
         }
     }
+    cout << "Cool type: " << cool_type << endl;
 
     return builder->getInt16Ty();
 }
@@ -2616,6 +2778,7 @@ void no_expr_class::code(ostream &s)
 int no_expr_class::cnt_max_tmps() { return 0; }
 llvm::Value *object_class::llvm_code(Builder &builder, Module &module)
 {
+
     auto offset = llvm_lookup_var(name);
 
     llvm::Function *fn = builder->GetInsertBlock()->getParent();
@@ -2634,6 +2797,10 @@ llvm::Value *object_class::llvm_code(Builder &builder, Module &module)
                 }
             }
         }
+    }
+    if (name == self)
+    {
+        return fn->getArg(0);
     }
     if (std::get<0>(offset))
     {

@@ -78,7 +78,7 @@ private:
    }
 
    void llvm_code_class(CgenNodeP node, std::ofstream *out);
-   llvm::Type *get_llvm_type(Symbol cool_type);
+   llvm::Type *get_llvm_type(Symbol cool_type, Symbol className);
 
    // The following methods emit code for
    // constants and global declarations.
@@ -101,6 +101,17 @@ private:
    void code_class_methods(CgenNodeP node);
    void llvm_code_class_methods(CgenNodeP node);
    void llvm_code_class_to_structs(CgenNodeP node);
+
+   void code_extern_fn();
+   // IO methods
+   void io_out_string();
+   void io_out_int();
+   void io_in_string();
+   void io_in_int();
+   // String methods
+   void code_length();
+   void code_concat();
+   void code_substring();
 
    // The following creates an inheritance graph from
    // a list of classes.  The graph is implemented as
