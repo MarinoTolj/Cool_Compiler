@@ -752,17 +752,21 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     // For llvm
     ofstream out("./llvm/hello_world.out");
     code_extern_fn();
+    llvm_code_class_name(this->root());
 
     llvm_code_class_to_structs(root());
     llvm_code_prototype_objects(root());
     llvm_code_object_initializers(root());
     llvm_code_class_methods(root());
-
+    // Object methods
+    code_abort();
+    code_type_name();
+    code_copy();
     // IO methods
-    io_out_string();
-    io_out_int();
-    io_in_string();
-    io_in_int();
+    code_out_string();
+    code_out_int();
+    code_in_string();
+    code_in_int();
     // String methods
     code_length();
     code_concat();
@@ -797,6 +801,12 @@ void CgenClassTable::code_extern_fn()
     llvm::Function::Create(llvm::FunctionType::get(builder->getInt32Ty(),
                                                    {builder->getInt8PtrTy()}, false),
                            llvm::Function::ExternalLinkage, "strlen", module.get());
+}
+void CgenClassTable::llvm_code_class_name(CgenNodeP node)
+{
+    // builder->CreateGlobalStringPtr(node->get_name()->get_string(), node->get_name()->get_string());
+    // for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+    //     llvm_code_class_name(cld->hd());
 }
 void CgenClassTable::llvm_code_class_to_structs(CgenNodeP node)
 {
@@ -947,7 +957,7 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
     llvm::StructType *currStructType = node->get_struct_type();
 
     Features fs = node->get_features();
-    // TODO: dont forget Object and IO methods
+    // TODO: dont forget Object methods
     if (!(className == "Object"))
     {
 
@@ -1017,7 +1027,16 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
     for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
         llvm_code_class_methods(cld->hd());
 }
-void CgenClassTable::io_out_string()
+void CgenClassTable::code_abort()
+{
+}
+void CgenClassTable::code_type_name()
+{
+}
+void CgenClassTable::code_copy()
+{
+}
+void CgenClassTable::code_out_string()
 {
     llvm::Function *out_string_fn = module->getFunction("IO.out_string");
     llvm::BasicBlock *entry = &out_string_fn->getEntryBlock();
@@ -1032,7 +1051,7 @@ void CgenClassTable::io_out_string()
     builder->CreateRet(self);
     llvm::verifyFunction(*out_string_fn);
 }
-void CgenClassTable::io_out_int()
+void CgenClassTable::code_out_int()
 {
     llvm::Function *out_int_fn = module->getFunction("IO.out_int");
     llvm::BasicBlock *entry = &out_int_fn->getEntryBlock();
@@ -1049,7 +1068,7 @@ void CgenClassTable::io_out_int()
     llvm::verifyFunction(*out_int_fn);
 }
 
-void CgenClassTable::io_in_string()
+void CgenClassTable::code_in_string()
 {
     llvm::Function *in_string_fn = module->getFunction("IO.in_string");
     llvm::BasicBlock *entry = &in_string_fn->getEntryBlock();
@@ -1084,7 +1103,7 @@ void CgenClassTable::io_in_string()
     builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
     llvm::verifyFunction(*in_string_fn);
 }
-void CgenClassTable::io_in_int()
+void CgenClassTable::code_in_int()
 {
     llvm::Function *in_int_fn = module->getFunction("IO.in_int");
     llvm::BasicBlock *entry = &in_int_fn->getEntryBlock();

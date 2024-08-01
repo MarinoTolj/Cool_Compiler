@@ -103,11 +103,16 @@ private:
    void llvm_code_class_to_structs(CgenNodeP node);
 
    void code_extern_fn();
+   void llvm_code_class_name(CgenNodeP node);
+   // Object method
+   void code_abort();
+   void code_type_name();
+   void code_copy();
    // IO methods
-   void io_out_string();
-   void io_out_int();
-   void io_in_string();
-   void io_in_int();
+   void code_out_string();
+   void code_out_int();
+   void code_in_string();
+   void code_in_int();
    // String methods
    void code_length();
    void code_concat();
