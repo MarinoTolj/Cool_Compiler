@@ -732,10 +732,11 @@ void set_tags(CgenNodeP node)
 /*
     radi sve:
      bigexpr.cl
+     dynamic dispatch
 
     radi ali triba popravit bitcast kod return vrijednosti:
         calls.cl
-        dynamic dispatch
+
 */
 
 CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
@@ -929,30 +930,38 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
 
     int index = 0;
     llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
+
     llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", classInit);
     builder->SetInsertPoint(entry);
-    llvm::Value *tag_ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), TAG_OFFSET);
+
+    llvm::Function *malloc = module->getFunction("malloc");
+    // TODO: class size
+    llvm::Value *stackClass = builder->CreateAlloca(currStructType->getPointerTo());
+    builder->CreateStore(classInit->getArg(0), stackClass);
+    llvm::Value *loadedClass = builder->CreateLoad(stackClass->getType()->getPointerElementType(), stackClass);
+
+    llvm::Value *tag_ptr = builder->CreateStructGEP(currStructType, loadedClass, TAG_OFFSET);
     builder->CreateStore(builder->getInt32(node->tag), tag_ptr);
 
-    llvm::Value *size_ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), SIZE_OFFSET);
+    llvm::Value *size_ptr = builder->CreateStructGEP(currStructType, loadedClass, SIZE_OFFSET);
     builder->CreateStore(builder->getInt32(DEFAULT_OBJFIELDS + node->attributes.size()), size_ptr);
 
-    llvm::Value *dispatch_ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), DISPTABLE_OFFSET);
+    llvm::Value *dispatch_ptr = builder->CreateStructGEP(currStructType, loadedClass, DISPTABLE_OFFSET);
     builder->CreateStore(module->getGlobalVariable((std::string)node->get_name()->get_string() + DISPTAB_SUFFIX), dispatch_ptr);
 
     if (className == "Int")
     {
-        llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), 0 + DISPTABLE_OFFSET);
+        llvm::Value *ptr = builder->CreateStructGEP(currStructType, loadedClass, 0 + DEFAULT_OBJFIELDS);
         builder->CreateStore(builder->getInt32(0), ptr);
     }
     else if (className == "Bool")
     {
-        llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), 0 + DISPTABLE_OFFSET);
+        llvm::Value *ptr = builder->CreateStructGEP(currStructType, loadedClass, 0 + DEFAULT_OBJFIELDS);
         builder->CreateStore(builder->getInt1(0), ptr);
     }
     else if (className == "String")
     {
-        llvm::Value *length_field = builder->CreateStructGEP(currStructType, classInit->getArg(0), 0 + DEFAULT_OBJFIELDS);
+        llvm::Value *length_field = builder->CreateStructGEP(currStructType, loadedClass, 0 + DEFAULT_OBJFIELDS);
         auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
         llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
 
@@ -960,7 +969,7 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
         // auto load_int = builder->CreateLoad(intClassInstance->getType()->getPointerElementType(), intClassInstance);
         builder->CreateStore(intClassInstance, length_field);
 
-        llvm::Value *str_field = builder->CreateStructGEP(currStructType, classInit->getArg(0), 1 + DEFAULT_OBJFIELDS);
+        llvm::Value *str_field = builder->CreateStructGEP(currStructType, loadedClass, 1 + DEFAULT_OBJFIELDS);
         llvm::Value *emptyStr = builder->CreateGlobalStringPtr("", "emptyStr");
         builder->CreateStore(emptyStr, str_field);
     }
@@ -970,7 +979,7 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
              Iter != node->attributes.end(); ++Iter)
         {
             llvm_tmp_table.enterscope();
-            llvm::Value *ptr = builder->CreateStructGEP(currStructType, classInit->getArg(0), index + DEFAULT_OBJFIELDS);
+            llvm::Value *ptr = builder->CreateStructGEP(currStructType, loadedClass, index + DEFAULT_OBJFIELDS);
 
             index++;
 
@@ -1073,11 +1082,16 @@ void CgenClassTable::llvm_code_class_methods(CgenNodeP node)
             llvm::BasicBlock *entry = llvm::BasicBlock::Create(*ctx.get(), "entry", mainFunction);
             builder->SetInsertPoint(entry);
             // Allocate main class and call init function.
-            llvm::AllocaInst *classInstance = builder->CreateAlloca(currStructType, nullptr);
+
+            llvm::Function *malloc = module->getFunction("malloc");
+            // TODO: class size
+            llvm::Value *mallocCall = builder->CreateCall(malloc, builder->getInt32(256));
+            llvm::Value *mainClass = builder->CreateBitCast(mallocCall, currStructType->getPointerTo());
+            // llvm::AllocaInst *classInstance = builder->CreateAlloca(currStructType, nullptr);
             llvm::Function *classInit = module->getFunction(className + CLASSINIT_SUFFIX);
 
-            builder->CreateCall(classInit, classInstance);
-            builder->CreateCall(currFunction, classInstance);
+            builder->CreateCall(classInit, mainClass);
+            builder->CreateCall(currFunction, mainClass);
 
             builder->CreateRet(nullptr);
             llvm::verifyFunction(*mainFunction);
@@ -1356,7 +1370,14 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
             llvm::Function *currFunction = module->getFunction(method_name);
             llvm::BasicBlock *entry = &currFunction->getEntryBlock();
             builder->SetInsertPoint(entry);
+            llvm::Function *malloc = module->getFunction("malloc");
+            // TODO: class size
+            llvm::Value *stackClass = builder->CreateAlloca(currStructType->getPointerTo());
+            builder->CreateStore(currFunction->getArg(0), stackClass);
+            llvm::Value *loadedClass = builder->CreateLoad(stackClass->getType()->getPointerElementType(), stackClass);
             llvm_tmp_table.enterscope();
+            auto bar = new llvm::Value *(loadedClass);
+            llvm_tmp_table.addid(self, bar);
             Formals fms = f_method->get_formals();
             auto it = currFunction->arg_begin(); // Get the iterator to the first argument
             auto end = currFunction->arg_end();  // Get the iterator to the end of the arguments
@@ -2918,7 +2939,7 @@ llvm::Value *object_class::llvm_code(Builder &builder, Module &module)
     llvm::Function *fn = builder->GetInsertBlock()->getParent();
     if (name == self)
     {
-        return fn->getArg(0);
+        return std::get<1>(offset);
     }
     if (std::get<0>(offset))
     {
