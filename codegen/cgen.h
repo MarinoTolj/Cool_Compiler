@@ -94,6 +94,7 @@ private:
    void code_class_objects(CgenNodeP node);
    void code_fill_features(CgenNodeP node);
    void code_dispatch_tables(CgenNodeP node);
+   void llvm_code_dispatch_tables(CgenNodeP node);
    void code_prototype_objects(CgenNodeP node);
    void llvm_code_prototype_objects(CgenNodeP node);
    void code_object_initializers(CgenNodeP node);
@@ -143,6 +144,7 @@ private:
    Basicness basic_status;   // `Basic' if class is basic
                              // `NotBasic' otherwise
    llvm::StructType *struct_type;
+   llvm::StructType *vtable;
    std::map<Symbol, int> attr_offset;
 
 public:
@@ -162,7 +164,7 @@ public:
 
    int get_meth_offset(Symbol meth_name);
    int get_attr_offset(Symbol attr_name);
-   int get_llvm_attr_offset(Symbol attr_name) { return this->attr_offset[attr_name]; }
+   int get_llvm_attr_offset(Symbol attr_name) { return this->attr_offset[attr_name] + DEFAULT_OBJFIELDS; }
    void set_llvm_atrr_offset(Symbol attr_name, int offset) { this->attr_offset[attr_name] = offset; }
    std::pair<std::string, CgenNodeP> get_meth_name(Symbol meth_name)
    {
@@ -179,6 +181,9 @@ public:
             break;
          }
       }
+
+      if (class_name == this->get_name())
+         return std::make_pair(new_method_name, this);
 
       return std::make_pair(new_method_name, get_parent_class(class_name));
    }
@@ -199,6 +204,11 @@ public:
       return struct_type;
    }
    void set_struct_type(llvm::StructType *type) { struct_type = type; }
+   llvm::StructType *get_vtable()
+   {
+      return vtable;
+   }
+   void set_vtable(llvm::StructType *type) { vtable = type; }
 };
 
 class BoolConst
