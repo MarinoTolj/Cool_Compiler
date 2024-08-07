@@ -138,6 +138,53 @@ std::tuple<bool, llvm::Value *, int> llvm_lookup_var(Symbol name)
     else
         return std::make_tuple(false, *loc, 0);
 }
+// Handles the creation of primitive Basic classees(Int, Str, Bool).
+// For Str class you will need to update length field manually.
+llvm::Value *get_primitive(Symbol primitiveName, Builder &builder, Module &module, llvm::Value *value)
+{
+    llvm::Function *malloc = module->getFunction("malloc");
+    if (primitiveName == Int)
+    {
+        auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
+
+        // class size:
+        //  class tag: 4 + Object size: 4 + Disp Table: 8 + int_field: 4=20
+        llvm::Value *mallocCall = builder->CreateCall(malloc, builder->getInt32(20));
+        llvm::Value *intClassInstance = builder->CreateBitCast(mallocCall, int_init->getArg(0)->getType());
+        builder->CreateCall(int_init, intClassInstance);
+
+        auto int_field = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0 + DEFAULT_OBJFIELDS);
+        builder->CreateStore(value, int_field);
+        return intClassInstance;
+    }
+    else if (primitiveName == Str)
+    {
+        auto str_init = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
+        // class size
+        //  class tag: 4 + Object size: 4 + Disp Table: 8 + ptr_to_Int: 8 + ptr_to_chars: 8=32
+        llvm::Value *mallocCall = builder->CreateCall(malloc, builder->getInt32(32));
+        llvm::Value *strClassInstance = builder->CreateBitCast(mallocCall, str_init->getArg(0)->getType());
+        builder->CreateCall(str_init, strClassInstance);
+        llvm::Value *str_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 1 + DEFAULT_OBJFIELDS);
+
+        builder->CreateStore(value, str_field);
+
+        return strClassInstance;
+    }
+    else if (primitiveName == Bool)
+    {
+        auto bool_init = module->getFunction((std::string) "Bool" + CLASSINIT_SUFFIX);
+        // class size
+        //  class tag: 4 + Object size: 4 + Disp Table: 8 + i1_field=17
+        llvm::Value *mallocCall = builder->CreateCall(malloc, builder->getInt32(17));
+        llvm::Value *boolClassInstance = builder->CreateBitCast(mallocCall, bool_init->getArg(0)->getType());
+        builder->CreateCall(bool_init, boolClassInstance);
+
+        auto bool_field = builder->CreateStructGEP(boolClassInstance->getType()->getPointerElementType(), boolClassInstance, 0 + DEFAULT_OBJFIELDS);
+        builder->CreateStore(value, bool_field);
+        return boolClassInstance;
+    }
+}
 
 //*********************************************************
 //
@@ -733,7 +780,9 @@ void set_tags(CgenNodeP node)
     radi sve:
      bigexpr.cl
      calls.cl
-     dynamic dispatch
+     dynamic dispatch.cl
+     sequence.cl
+     assignment-val.cl
 
 
 
@@ -935,7 +984,7 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
     builder->SetInsertPoint(entry);
 
     llvm::Function *malloc = module->getFunction("malloc");
-    // TODO: class size
+
     llvm::Value *stackClass = builder->CreateAlloca(currStructType->getPointerTo());
     builder->CreateStore(classInit->getArg(0), stackClass);
     llvm::Value *loadedClass = builder->CreateLoad(stackClass->getType()->getPointerElementType(), stackClass);
@@ -962,10 +1011,8 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
     else if (className == "String")
     {
         llvm::Value *length_field = builder->CreateStructGEP(currStructType, loadedClass, 0 + DEFAULT_OBJFIELDS);
-        auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
-        llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
+        llvm::Value *intClassInstance = get_primitive(Int, builder, module, builder->getInt32(0));
 
-        builder->CreateCall(int_init, intClassInstance);
         // auto load_int = builder->CreateLoad(intClassInstance->getType()->getPointerElementType(), intClassInstance);
         builder->CreateStore(intClassInstance, length_field);
 
@@ -987,9 +1034,14 @@ void CgenClassTable::llvm_code_object_initializers(CgenNodeP node)
             std::string attr_type = (*Iter)->get_type()->get_string();
             if (expr->is_no_expr() && (attr_type == "Bool" || attr_type == "String" || attr_type == "Int"))
             {
-                llvm::Value *new_primitive = builder->CreateAlloca(get_llvm_type((*Iter)->get_type(), node->get_name()));
-                builder->CreateCall(module->getFunction(attr_type + CLASSINIT_SUFFIX), new_primitive);
-                builder->CreateStore(new_primitive, ptr);
+                // TODO: class size: 32 since Str class is largest
+                llvm::Value *mallocCall = builder->CreateCall(malloc, builder->getInt32(32));
+                llvm::Value *newPrimitive = builder->CreateBitCast(mallocCall, get_llvm_type((*Iter)->get_type(), (*Iter)->get_type())->getPointerTo());
+
+                // builder->CreateCall(classInit, classInstance);
+                //  llvm::Value *new_primitive = builder->CreateAlloca(get_llvm_type((*Iter)->get_type(), node->get_name()));
+                builder->CreateCall(module->getFunction(attr_type + CLASSINIT_SUFFIX), newPrimitive);
+                builder->CreateStore(newPrimitive, ptr);
                 continue;
             }
             else if (expr->is_no_expr())
@@ -1370,8 +1422,7 @@ void CgenClassTable::llvm_code_class(CgenNodeP node, std::ofstream *out)
             llvm::Function *currFunction = module->getFunction(method_name);
             llvm::BasicBlock *entry = &currFunction->getEntryBlock();
             builder->SetInsertPoint(entry);
-            llvm::Function *malloc = module->getFunction("malloc");
-            // TODO: class size
+
             llvm::Value *stackClass = builder->CreateAlloca(currStructType->getPointerTo());
             builder->CreateStore(currFunction->getArg(0), stackClass);
             llvm::Value *loadedClass = builder->CreateLoad(stackClass->getType()->getPointerElementType(), stackClass);
@@ -2023,8 +2074,7 @@ llvm::Value *assign_class::llvm_code(Builder &builder, Module &module)
     if (std::get<0>(offset))
     {
 
-        auto id = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), std::get<2>(offset));
-        // auto load_id = builder->CreateLoad(id->getType()->getPointerElementType(), id);
+        llvm::Value *id = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), std::get<2>(offset));
         builder->CreateStore(rhs_expr, id);
         return id;
     }
@@ -2092,23 +2142,22 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
     auto node = class_table->probe(tp);
 
     int offset = node->get_meth_offset(this->name);
-    llvm::Value *dispatch_table_ptr;
 
     std::vector<llvm::Value *> args;
     llvm::Function *fn = builder->GetInsertBlock()->getParent();
 
     llvm::Value *first_arg = expr->llvm_code(builder, module);
-    dispatch_table_ptr = builder->CreateStructGEP(first_arg->getType()->getPointerElementType(), first_arg, DISPTABLE_OFFSET);
+    llvm::Value *dispatch_table_ptr = builder->CreateStructGEP(first_arg->getType()->getPointerElementType(), first_arg, DISPTABLE_OFFSET);
 
     llvm::Value *dispatch_table = builder->CreateLoad(dispatch_table_ptr->getType()->getPointerElementType(), dispatch_table_ptr);
 
     auto callee_ptr = builder->CreateStructGEP(dispatch_table->getType()->getPointerElementType(), dispatch_table, offset);
 
-    llvm::Value *callee = builder->CreateLoad(callee_ptr->getType()->getPointerElementType(), callee_ptr);
+    llvm::Value *callee = builder->CreateLoad(callee_ptr->getType()->getPointerElementType(), callee_ptr, this->name->get_string());
 
     llvm::FunctionType *calleeType = llvm::dyn_cast<llvm::FunctionType>(callee->getType()->getPointerElementType());
 
-    auto castedCallee = (llvm::Function *)builder->CreateBitCast(callee, llvm::PointerType::getUnqual(calleeType));
+    auto castedCallee = (llvm::Function *)builder->CreateBitCast(callee, llvm::PointerType::getUnqual(calleeType), this->name->get_string());
 
     if (calleeType->getFunctionParamType(0) != first_arg->getType())
     {
@@ -2126,7 +2175,6 @@ llvm::Value *dispatch_class::llvm_code(Builder &builder, Module &module)
         }
         else
         {
-            // args.push_back(builder->CreateLoad(value->getType(), value));
             args.push_back(value);
         }
     }
@@ -2195,13 +2243,15 @@ llvm::Value *cond_class::llvm_code(Builder &builder, Module &module)
 
     llvm::Value *pred_val = pred->llvm_code(builder, module);
     pred_val->dump();
-    // llvm::Value *ptr_to_bool = builder->CreateStructGEP(pred_val->getType()->getPointerElementType(), pred_val, 0 + DISPTABLE_OFFSET);
-
-    // pred_val = builder->CreateLoad(ptr_to_bool->getType()->getPointerElementType(), ptr_to_bool);
 
     // maybe or maybe not neccessary.
     //  CondV = Builder->CreateFCmpONE(
     //    CondV, ConstantFP::get(*TheContext, APFloat(0.0)), "ifcond");
+    if (pred_val->getType() != builder->getInt1Ty())
+    {
+        llvm::Value *ptr_to_bool = builder->CreateStructGEP(pred_val->getType()->getPointerElementType(), pred_val, 0 + DEFAULT_OBJFIELDS);
+        pred_val = builder->CreateLoad(ptr_to_bool->getType()->getPointerElementType(), ptr_to_bool);
+    }
     builder->CreateCondBr(pred_val, thenBlock, elseBlock);
 
     fn->getBasicBlockList().push_back(thenBlock);
@@ -2264,6 +2314,12 @@ llvm::Value *loop_class::llvm_code(Builder &builder, Module &module)
     fn->getBasicBlockList().push_back(condBlock);
     builder->SetInsertPoint(condBlock);
     llvm::Value *pred_val = pred->llvm_code(builder, module);
+    if (pred_val->getType() != builder->getInt1Ty())
+    {
+        llvm::Value *ptr_to_bool = builder->CreateStructGEP(pred_val->getType()->getPointerElementType(), pred_val, 0 + DEFAULT_OBJFIELDS);
+        pred_val = builder->CreateLoad(ptr_to_bool->getType()->getPointerElementType(), ptr_to_bool);
+    }
+
     builder->CreateCondBr(pred_val, startBlock, endBlock);
 
     fn->getBasicBlockList().push_back(startBlock);
@@ -2528,16 +2584,8 @@ llvm::Value *plus_class::llvm_code(Builder &builder, Module &module)
     }
 
     llvm::Value *addtmp = builder->CreateAdd(L_val, R_val, "addtmp");
-    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
-    llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
-    // TODO: decide if necessary
-    // builder->CreateCall(int_init, intClassInstance);
-    auto int_val = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0 + DEFAULT_OBJFIELDS);
-    builder->CreateStore(addtmp, int_val);
-    // TODO: decide what to return from plus(and similar classes) class. Just the value(addtmp) or whole Int instance(intClassInstance)
+    llvm::Value *intClassInstance = get_primitive(Int, builder, module, addtmp);
     cout << "Plus done\n";
-
-    // return builder->CreateLoad(intClassInstance->getType()->getPointerElementType(), intClassInstance);
     return intClassInstance;
 }
 void plus_class::code(ostream &s)
@@ -2689,9 +2737,11 @@ llvm::Value *lt_class::llvm_code(Builder &builder, Module &module)
 
         R_val = builder->CreateLoad(builder->getInt32Ty(), R_pointer);
     }
+    llvm::Value *boolClassInstance = get_primitive(Bool, builder, module, builder->CreateICmpULT(L_val, R_val, "lttmp"));
+
     cout << "LT done\n";
     // Integer Compare UnSigned Less Than
-    return builder->CreateICmpULT(L_val, R_val, "lttmp");
+    return boolClassInstance;
 }
 void lt_class::code(ostream &s)
 {
@@ -2790,18 +2840,11 @@ int comp_class::cnt_max_tmps() { return e1->cnt_max_tmps(); }
 
 llvm::Value *int_const_class::llvm_code(Builder &builder, Module &module)
 {
-
     int real_int = atoi(inttable.lookup_string(token->get_string())->get_string());
 
-    auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
-    llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
-    // builder->CreateCall(int_init, intClassInstance);
-
-    auto int_val = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0 + DEFAULT_OBJFIELDS);
-    builder->CreateStore(llvm::ConstantInt::get(builder->getContext(), llvm::APInt(32, real_int)), int_val);
-    return intClassInstance;
-    // return llvm::ConstantInt::get(builder->getContext(), llvm::APInt(32, real_int));
+    return get_primitive(Int, builder, module, llvm::ConstantInt::get(builder->getContext(), llvm::APInt(32, real_int)));
 }
+
 void int_const_class::code(ostream &s)
 {
     //
@@ -2813,25 +2856,14 @@ int int_const_class::cnt_max_tmps() { return 0; }
 llvm::Value *string_const_class::llvm_code(Builder &builder, Module &module)
 {
     StringEntry *string_literal = stringtable.lookup_string(token->get_string());
-    auto str_init = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
-    llvm::AllocaInst *strClassInstance = builder->CreateAlloca(str_init->getArg(0)->getType()->getPointerElementType(), nullptr);
-    builder->CreateCall(str_init, strClassInstance);
+
+    llvm::Value *strClassInstance = get_primitive(Str, builder, module, builder->CreateGlobalStringPtr(string_literal->get_string()));
 
     llvm::Value *length_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 0 + DEFAULT_OBJFIELDS);
-    // auto int_init = module->getFunction((std::string) "Int" + CLASSINIT_SUFFIX);
-    //  llvm::AllocaInst *intClassInstance = builder->CreateAlloca(int_init->getArg(0)->getType()->getPointerElementType(), nullptr);
-    //  builder->CreateCall(int_init, intClassInstance);
 
-    // llvm::Value *int_val_field = builder->CreateStructGEP(intClassInstance->getType()->getPointerElementType(), intClassInstance, 0 + DEFAULT_OBJFIELDS);
-    // builder->CreateLoad()
     auto loaded_field = builder->CreateLoad(length_field->getType()->getPointerElementType(), length_field);
     builder->CreateStore(builder->getInt32(string_literal->get_len()), builder->CreateStructGEP(loaded_field->getType()->getPointerElementType(), loaded_field, 0 + DEFAULT_OBJFIELDS));
 
-    // builder->CreateStore(intClassInstance, length_field);
-
-    llvm::Value *str_field = builder->CreateStructGEP(strClassInstance->getType()->getPointerElementType(), strClassInstance, 1 + DEFAULT_OBJFIELDS);
-    llvm::Value *str_val = builder->CreateGlobalStringPtr(string_literal->get_string());
-    builder->CreateStore(str_val, str_field);
     return strClassInstance;
 }
 void string_const_class::code(ostream &s)
@@ -2841,12 +2873,7 @@ void string_const_class::code(ostream &s)
 int string_const_class::cnt_max_tmps() { return 0; }
 llvm::Value *bool_const_class::llvm_code(Builder &builder, Module &module)
 {
-    auto bool_init = module->getFunction((std::string) "Bool" + CLASSINIT_SUFFIX);
-    llvm::AllocaInst *boolClassInstance = builder->CreateAlloca(bool_init->getArg(0)->getType()->getPointerElementType(), nullptr);
-
-    auto bool_val = builder->CreateStructGEP(boolClassInstance->getType()->getPointerElementType(), boolClassInstance, 0 + DEFAULT_OBJFIELDS);
-    builder->CreateStore(builder->getInt1(val), bool_val);
-    return boolClassInstance;
+    return get_primitive(Bool, builder, module, builder->getInt1(val));
 }
 void bool_const_class::code(ostream &s)
 {
