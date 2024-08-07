@@ -732,10 +732,10 @@ void set_tags(CgenNodeP node)
 /*
     radi sve:
      bigexpr.cl
+     calls.cl
      dynamic dispatch
 
-    radi ali triba popravit bitcast kod return vrijednosti:
-        calls.cl
+
 
 */
 
@@ -2856,8 +2856,11 @@ int bool_const_class::cnt_max_tmps() { return 0; }
 llvm::Value *new__class::llvm_code(Builder &builder, Module &module)
 {
     llvm::Function *classInit = module->getFunction((std::string)type_name->get_string() + CLASSINIT_SUFFIX);
+    llvm::Function *malloc = module->getFunction("malloc");
+    // TODO: class size
+    llvm::Value *mallocCall = builder->CreateCall(malloc, builder->getInt32(256));
+    llvm::Value *classInstance = builder->CreateBitCast(mallocCall, classInit->getArg(0)->getType());
 
-    llvm::AllocaInst *classInstance = builder->CreateAlloca(classInit->getArg(0)->getType()->getPointerElementType(), nullptr);
     builder->CreateCall(classInit, classInstance);
     return classInstance;
 }
