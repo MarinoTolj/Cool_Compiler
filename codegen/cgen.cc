@@ -1183,8 +1183,8 @@ void CgenClassTable::code_abort()
     llvm::Function *printf = module->getFunction("printf");
     llvm::Function *exit = module->getFunction("exit");
     auto type_name = builder->CreateCall(type_name_fn, abort_fn->getArg(0));
-    auto abort_spec = builder->CreateGlobalStringPtr("%s %s\n");
-    auto abort_msg = builder->CreateGlobalStringPtr("Abort called from class");
+    auto abort_spec = builder->CreateGlobalStringPtr("%s %s\n", "abort_format");
+    auto abort_msg = builder->CreateGlobalStringPtr("Abort called from class", "abort_msg");
     builder->CreateCall(printf, {abort_spec, abort_msg, builder->CreateExtractValue(type_name, 1 + DEFAULT_OBJFIELDS)});
     auto init_obj = module->getFunction((std::string) "Object" + CLASSINIT_SUFFIX);
     llvm::AllocaInst *new_obj = builder->CreateAlloca(init_obj->getArg(0)->getType()->getPointerElementType());
