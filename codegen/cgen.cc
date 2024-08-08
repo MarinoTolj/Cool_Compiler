@@ -785,8 +785,11 @@ void set_tags(CgenNodeP node)
         bool
         calls
         dynamic dispatch
+        static dispatch
+        eval-order-args
         sequence
-
+    ne radi jer je return tip SELF_TYPE:
+        scoping.cl(radi kad se manualno popravi)
 
 
 */
@@ -2144,7 +2147,50 @@ void assign_class::code(ostream &s)
     emit_store(ACC, pr.second, pr.first, s);
 }
 int assign_class::cnt_max_tmps() { return expr->cnt_max_tmps(); }
-llvm::Value *static_dispatch_class::llvm_code(Builder &builder, Module &module) {}
+llvm::Value *static_dispatch_class::llvm_code(Builder &builder, Module &module)
+{
+    int offset =
+        class_table->probe(this->type_name)->get_meth_offset(this->name);
+
+    std::vector<llvm::Value *> args;
+    llvm::Function *fn = builder->GetInsertBlock()->getParent();
+
+    llvm::Value *first_arg = expr->llvm_code(builder, module);
+
+    llvm::Value *dispatch_table = module->getNamedGlobal(this->type_name->get_string() + (std::string)DISPTAB_SUFFIX);
+
+    auto callee_ptr = builder->CreateStructGEP(dispatch_table->getType()->getPointerElementType(), dispatch_table, offset);
+
+    llvm::Value *callee = builder->CreateLoad(callee_ptr->getType()->getPointerElementType(), callee_ptr, this->name->get_string());
+
+    llvm::FunctionType *calleeType = llvm::dyn_cast<llvm::FunctionType>(callee->getType()->getPointerElementType());
+
+    auto castedCallee = (llvm::Function *)builder->CreateBitCast(callee, llvm::PointerType::getUnqual(calleeType), this->name->get_string());
+
+    if (calleeType->getFunctionParamType(0) != first_arg->getType())
+    {
+        first_arg = builder->CreateBitCast(first_arg, calleeType->getFunctionParamType(0));
+    }
+    // TODO: handle case for chaining methods. ...concat(...).length()
+
+    args.push_back(first_arg);
+    for (int i = actual->first(); actual->more(i); i = actual->next(i))
+    {
+        auto value = actual->nth(i)->llvm_code(builder, module);
+        if (value->getType()->isPointerTy())
+        {
+            args.push_back(builder->CreateLoad(value->getType()->getPointerElementType(), value));
+        }
+        else
+        {
+            args.push_back(value);
+        }
+    }
+
+    auto function_call = builder->CreateCall(calleeType, castedCallee, args);
+
+    return function_call;
+}
 void static_dispatch_class::code(ostream &s)
 {
     for (int i = actual->first(); actual->more(i); i = actual->next(i))
