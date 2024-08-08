@@ -104,7 +104,7 @@ private:
    void llvm_code_class_to_structs(CgenNodeP node);
 
    void code_extern_fn();
-   void llvm_code_class_name(CgenNodeP node);
+   void llvm_code_class_name(CgenNodeP node, std::vector<llvm::Constant *> &strings);
    // Object method
    void code_abort();
    void code_type_name();

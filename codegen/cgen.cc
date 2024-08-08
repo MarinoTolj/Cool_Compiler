@@ -778,11 +778,14 @@ void set_tags(CgenNodeP node)
 // TODO: pocetak
 /*
     radi sve:
-     bigexpr.cl
-     calls.cl
-     dynamic dispatch.cl
-     sequence.cl
-     assignment-val.cl
+        abort
+        assignment-val
+        basicinit
+        bigexpr
+        bool
+        calls
+        dynamic dispatch
+        sequence
 
 
 
@@ -813,7 +816,13 @@ CgenClassTable::CgenClassTable(Classes classes, ostream &s) : nds(NULL), str(s)
     // For llvm
     ofstream out("./llvm/hello_world.out");
     code_extern_fn();
-    llvm_code_class_name(this->root());
+    std::vector<llvm::Constant *> strings;
+    llvm_code_class_name(root(), strings);
+
+    llvm::ArrayType *ArrayType = llvm::ArrayType::get(builder->getInt8PtrTy(), strings.size());
+    llvm::Constant *ArrayConstant = llvm::ConstantArray::get(ArrayType, strings);
+
+    new llvm::GlobalVariable(*module.get(), ArrayType, true, llvm::GlobalValue::PrivateLinkage, ArrayConstant, ".str_array");
 
     llvm_code_prototype_objects(root());
     llvm_code_class_methods(root());
@@ -865,12 +874,21 @@ void CgenClassTable::code_extern_fn()
     llvm::Function::Create(llvm::FunctionType::get(builder->getInt32Ty(),
                                                    {builder->getInt8PtrTy()}, false),
                            llvm::Function::ExternalLinkage, "strlen", module.get());
-}
-void CgenClassTable::llvm_code_class_name(CgenNodeP node)
+    // exit
+    llvm::Function::Create(llvm::FunctionType::get(builder->getVoidTy(),
+                                                   {builder->getInt32Ty()}, false),
+                           llvm::Function::ExternalLinkage, "exit", module.get());
+};
+void CgenClassTable::llvm_code_class_name(CgenNodeP node, std::vector<llvm::Constant *> &strings)
 {
-    // builder->CreateGlobalStringPtr(node->get_name()->get_string(), node->get_name()->get_string());
-    // for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
-    //     llvm_code_class_name(cld->hd());
+
+    auto className = module->getNamedGlobal(node->get_name()->get_string());
+    llvm::Constant *Zero = llvm::ConstantInt::get(builder->getInt32Ty(), 0);
+    strings.push_back(llvm::ConstantExpr::getInBoundsGetElementPtr(className->getValueType(), className, llvm::ArrayRef<llvm::Constant *>{Zero, Zero}));
+    for (List<CgenNode> *cld = node->get_children(); cld != NULL; cld = cld->tl())
+    {
+        llvm_code_class_name(cld->hd(), strings);
+    }
 }
 void CgenClassTable::llvm_code_class_to_structs(CgenNodeP node)
 {
@@ -1161,10 +1179,18 @@ void CgenClassTable::code_abort()
     llvm::BasicBlock *entry = &abort_fn->getEntryBlock();
     builder->SetInsertPoint(entry);
 
-    auto init_string = module->getFunction((std::string) "Object" + CLASSINIT_SUFFIX);
-    llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType());
+    llvm::Function *type_name_fn = module->getFunction("Object.type_name");
+    llvm::Function *printf = module->getFunction("printf");
+    llvm::Function *exit = module->getFunction("exit");
+    auto type_name = builder->CreateCall(type_name_fn, abort_fn->getArg(0));
+    auto abort_spec = builder->CreateGlobalStringPtr("%s %s\n");
+    auto abort_msg = builder->CreateGlobalStringPtr("Abort called from class");
+    builder->CreateCall(printf, {abort_spec, abort_msg, builder->CreateExtractValue(type_name, 1 + DEFAULT_OBJFIELDS)});
+    auto init_obj = module->getFunction((std::string) "Object" + CLASSINIT_SUFFIX);
+    llvm::AllocaInst *new_obj = builder->CreateAlloca(init_obj->getArg(0)->getType()->getPointerElementType());
+    builder->CreateCall(exit, builder->getInt32(1));
 
-    builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
+    builder->CreateRet(builder->CreateLoad(new_obj->getType()->getPointerElementType(), new_obj));
     llvm::verifyFunction(*abort_fn);
 }
 void CgenClassTable::code_type_name()
@@ -1172,11 +1198,22 @@ void CgenClassTable::code_type_name()
     llvm::Function *type_name_fn = module->getFunction("Object.type_name");
     llvm::BasicBlock *entry = &type_name_fn->getEntryBlock();
     builder->SetInsertPoint(entry);
+    auto selfptr = type_name_fn->getArg(0);
+    auto offset = builder->CreateStructGEP(selfptr->getType()->getPointerElementType(), selfptr, TAG_OFFSET);
+    auto loaded_offset = builder->CreateLoad(offset->getType()->getPointerElementType(), offset);
+    auto strArray = module->getNamedGlobal(".str_array");
+    llvm::Value *GEP1 = builder->CreateInBoundsGEP(strArray->getValueType(), strArray, {builder->getInt32(0), loaded_offset});
+    llvm::Value *Load1 = builder->CreateLoad(GEP1->getType()->getPointerElementType(), GEP1);
+    auto strClassInst = get_primitive(Str, builder, module, Load1);
 
-    auto init_string = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
-    llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType());
+    llvm::Function *strlen = module->getFunction("strlen");
+    auto new_length = builder->CreateCall(strlen, Load1);
+    llvm::Value *length_field = builder->CreateStructGEP(strClassInst->getType()->getPointerElementType(), strClassInst, 0 + DEFAULT_OBJFIELDS);
 
-    builder->CreateRet(builder->CreateLoad(new_string->getType()->getPointerElementType(), new_string));
+    auto loaded_field = builder->CreateLoad(length_field->getType()->getPointerElementType(), length_field);
+    builder->CreateStore(new_length, builder->CreateStructGEP(loaded_field->getType()->getPointerElementType(), loaded_field, 0 + DEFAULT_OBJFIELDS));
+
+    builder->CreateRet(builder->CreateLoad(strClassInst->getType()->getPointerElementType(), strClassInst));
     llvm::verifyFunction(*type_name_fn);
 }
 void CgenClassTable::code_copy()
@@ -1184,7 +1221,16 @@ void CgenClassTable::code_copy()
     llvm::Function *copy_fn = module->getFunction("Object.copy");
     llvm::BasicBlock *entry = &copy_fn->getEntryBlock();
     builder->SetInsertPoint(entry);
-    builder->CreateRet(copy_fn->getArg(0));
+
+    llvm::Function *memcpy = module->getFunction("memcpy");
+    llvm::Function *malloc = module->getFunction("malloc");
+
+    // TODO: class size
+    auto malloc_call = builder->CreateCall(malloc, builder->getInt32(256));
+    auto self_to_i8 = builder->CreateBitCast(copy_fn->getArg(0), builder->getInt8PtrTy());
+    builder->CreateCall(memcpy, {malloc_call, self_to_i8, builder->getInt32(256)});
+    auto newClass = builder->CreateBitCast(malloc_call, copy_fn->getArg(0)->getType());
+    builder->CreateRet(newClass);
     llvm::verifyFunction(*copy_fn);
 }
 void CgenClassTable::code_out_string()
@@ -1233,7 +1279,7 @@ void CgenClassTable::code_in_string()
 
     auto init_string = module->getFunction((std::string) "String" + CLASSINIT_SUFFIX);
     llvm::AllocaInst *new_string = builder->CreateAlloca(init_string->getArg(0)->getType()->getPointerElementType());
-    llvm::Value *bufferSize = builder->getInt32(1024);
+    llvm::Value *bufferSize = builder->getInt32(1026);
     llvm::Value *buffer = builder->CreateAlloca(builder->getInt8Ty(), bufferSize, "buffer");
 
     llvm::Value *new_string_length_field = builder->CreateStructGEP(new_string->getType()->getPointerElementType(), new_string, 0 + DEFAULT_OBJFIELDS);
@@ -1646,6 +1692,7 @@ void CgenClassTable::install_class(CgenNodeP nd)
 
     llvm::StructType *currStructType = llvm::StructType::create(*ctx.get(), name->get_string());
     llvm::StructType *vTable = llvm::StructType::create(*ctx.get(), (std::string)name->get_string() + DISPTAB_SUFFIX);
+    builder->CreateGlobalString(name->get_string(), name->get_string(), 0, module.get());
 
     nd->set_struct_type(currStructType);
     nd->set_vtable(vTable);
@@ -2075,6 +2122,9 @@ llvm::Value *assign_class::llvm_code(Builder &builder, Module &module)
     {
 
         llvm::Value *id = builder->CreateStructGEP(fn->getArg(0)->getType()->getPointerElementType(), fn->getArg(0), std::get<2>(offset));
+        if (rhs_expr->getType() != id->getType()->getPointerElementType())
+            rhs_expr = builder->CreateBitCast(rhs_expr, id->getType()->getPointerElementType());
+
         builder->CreateStore(rhs_expr, id);
         return id;
     }
@@ -2217,9 +2267,8 @@ void dispatch_class::code(ostream &s)
     tp = tp == SELF_TYPE ? cur_node->get_name() : tp;
     // tražim funkciju unutar tablice poziva
     CgenNode *node = class_table->probe(tp);
-    cout << "Node: " << node->get_name()->get_string() << endl;
+
     int offset = node->get_meth_offset(this->name);
-    cout << "Offset: " << offset << endl;
 
     emit_load(T11, offset, T11, s);
     // poziv same funkcije
@@ -2930,13 +2979,8 @@ llvm::Value *isvoid_class::llvm_code(Builder &builder, Module &module)
     llvm::Value *expr = e1->llvm_code(builder, module);
 
     llvm::Value *is_null = builder->CreateIsNull(expr);
-    auto bool_init = module->getFunction((std::string) "Bool" + CLASSINIT_SUFFIX);
-    llvm::AllocaInst *boolClassInstance = builder->CreateAlloca(bool_init->getArg(0)->getType()->getPointerElementType(), nullptr);
 
-    auto bool_val = builder->CreateStructGEP(boolClassInstance->getType()->getPointerElementType(), boolClassInstance, 0);
-    builder->CreateStore(is_null, bool_val);
-    // return builder->CreateLoad(boolClassInstance->getType()->getPointerElementType(), boolClassInstance);
-    return boolClassInstance;
+    return get_primitive(Bool, builder, module, is_null);
 }
 void isvoid_class::code(ostream &s)
 {
